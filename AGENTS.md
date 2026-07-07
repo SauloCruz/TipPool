@@ -37,6 +37,12 @@ with:
   `.env.example`, live SQLite data/backups, `.claude/`, `.codex/`, caches,
   logs, and archive bundles. Before pushing, inspect the staged files and run a
   secret scan; never commit venue data or real Square/admin credentials.
+- **Version control workflow:** this repo lives at
+  `https://github.com/SauloCruz/TipPool`. Every AI agent and developer must work
+  from git, pull the latest `main` before starting when possible, keep changes
+  small, update Markdown handoff notes as behavior/status changes, inspect
+  staged files for secrets/live data, run safe validation, and commit each
+  completed unit of work with a clear message.
 
 When this status conflicts with older sections below (for example “RBAC
 deferred” or “multi-venue non-goal”), this status block and the Owner Decisions

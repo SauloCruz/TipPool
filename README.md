@@ -154,6 +154,23 @@ will refuse to guess at anything unmapped.
 
 ---
 
+## Development workflow
+
+This repository is the source of truth at
+[`SauloCruz/TipPool`](https://github.com/SauloCruz/TipPool). Every agent or developer
+working on the app should use git from the start of the task:
+
+- Pull the latest `main` before editing.
+- Keep changes small, review staged files before committing, and run the relevant safe
+  validation command.
+- Update `README.md` and `AGENTS.md` whenever behavior, status, setup, or next steps
+  change.
+- Commit each completed unit of work with a clear message.
+- Never commit `.env`, live SQLite data/backups, Square credentials, admin passwords,
+  local AI/tool state, caches, logs, or one-off archive bundles.
+
+---
+
 ## Status
 
 **In production at two venues.** Daily entries, Square pulls, finalized snapshots, weekly
