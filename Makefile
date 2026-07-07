@@ -12,6 +12,26 @@ deps: $(VENV)/bin/pip
 run: deps
 	$(PY) -m app.serve
 
+.PHONY: docker-build
+docker-build:
+	docker compose build
+
+.PHONY: docker-up
+docker-up:
+	docker compose up -d
+
+.PHONY: docker-down
+docker-down:
+	docker compose down
+
+.PHONY: docker-logs
+docker-logs:
+	docker compose logs -f app
+
+.PHONY: docker-backup
+docker-backup:
+	docker compose exec app python -m app.backup
+
 .PHONY: backup
 backup: deps
 	$(PY) -m app.backup

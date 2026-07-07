@@ -144,18 +144,24 @@ Secrets stay server-side; the Square tokens never reach the browser.
 git clone https://github.com/SauloCruz/TipPool.git
 cd TipPool
 cp .env.example .env     # set ADMIN_EMAIL / ADMIN_PASSWORD before first boot
-make run
+docker compose build
+docker compose up -d
 ```
 
-`make run` creates the virtualenv, installs dependencies, and starts the server — it
-prints one URL for the local machine and one for phones/tablets on the same Wi-Fi.
-Sign in, pick a venue, add staff, and enter a day.
+Docker Compose is the normal local runtime. It starts one app container backed by one
+persistent SQLite volume. Open <http://127.0.0.1:8377>, sign in, pick a venue, add staff,
+and enter a day.
 
 | Command | What it does |
 |---|---|
-| `make run` | Start the app (binds `0.0.0.0`, LAN-visible) |
+| `make docker-build` | Build the local Docker image |
+| `make docker-up` | Start the app container |
+| `make docker-down` | Stop the app container and keep data |
+| `make docker-logs` | Follow app logs |
+| `make docker-backup` | Timestamped online backup of the SQLite DB inside the Docker volume |
+| `make run` | Developer fallback: run directly in a Python virtualenv |
 | `make test` | Run the full test suite |
-| `make backup` | Timestamped online backup of the SQLite DB |
+| `make backup` | Developer fallback: backup the direct local SQLite DB |
 
 Square is optional: without credentials the app runs in manual-entry mode. To connect,
 set `SQUARE_ACCESS_TOKEN` / `SQUARE_LOCATION_ID` (comma-separated for multi-location
@@ -165,12 +171,12 @@ will refuse to guess at anything unmapped.
 
 ---
 
-## Local container test
+## Docker runtime
 
 Docker support is intentionally simple: one FastAPI/Uvicorn container and one persistent
-SQLite volume. Local Compose runs use a named volume (`tippool-data`) and set
-`NIGHTLY_SYNC=0`, so smoke tests do not touch your live `data/tippool.sqlite3` or pull
-from Square automatically.
+SQLite volume. Compose runs use a named volume (`tippool-data`) and set `NIGHTLY_SYNC=0`
+by default, so local restarts do not pull from Square automatically. Manual Square pulls
+still work when credentials are present in `.env`.
 
 ```bash
 cp .env.example .env     # if you do not already have one

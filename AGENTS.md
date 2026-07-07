@@ -34,11 +34,15 @@ with:
   monthly only; data from `GET /api/periods/{anchor}/form4070`). SSN/address
   intentionally never stored — blank for hand-fill. Gratuity excluded from
   the 4070 (wages, not tips). Buttons live on the Export screen.
-- **Container prep (2026-07-07):** Docker support is one app container plus one
-  persistent SQLite volume. Files: `Dockerfile`, `.dockerignore`,
-  `docker-compose.yml`; health endpoint: `GET /healthz` opens SQLite and
-  returns schema version. Local Compose uses named volume `tippool-data` and
-  forces `NIGHTLY_SYNC=0` so smoke tests do not pull Square automatically.
+- **Container runtime (2026-07-07):** owner decision: Docker Compose is now
+  the normal local runtime. Use the active clone at
+  `/Users/saulocruz/Projects/TipPool`, not the stale iCloud working copy.
+  Docker support is one app container plus one persistent SQLite volume. Files:
+  `Dockerfile`, `.dockerignore`, `docker-compose.yml`; health endpoint:
+  `GET /healthz` opens SQLite and returns schema version. Compose uses named
+  volume `tippool-data` and forces `NIGHTLY_SYNC=0`; manual Square pulls still
+  work, but nightly auto-pull should only be enabled after backup/monitoring is
+  confirmed.
   Imported SQLite backups may arrive in the volume as `root`; repair with
   `chown -R app:app /data && chmod 700 /data && chmod 600 /data/tippool.sqlite3`
   before startup or SQLite will fail with "unable to open database file".
