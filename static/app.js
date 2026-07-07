@@ -200,8 +200,8 @@ function renderLogin() {
   const email = el("input", { type: "email", autocomplete: "username", placeholder: "email" });
   const pass = el("input", { type: "password", autocomplete: "current-password", placeholder: "password" });
   const form = el("form", { class: "login" },
-    el("h1", {}, "Tavern Law"),
-    el("div", { class: "sub" }, "Tip Pool"),
+    el("img", { class: "loginlogo", src: "/static/logo.png",
+                alt: "TipPool — tip pool management made simple" }),
     el("label", {}, "Email"), email,
     el("label", {}, "Password"), pass,
     el("div", { style: "margin-top:16px" },
