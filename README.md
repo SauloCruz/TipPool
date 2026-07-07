@@ -16,6 +16,7 @@ One app, one login, two completely different sets of rules.
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-storage-003B57?logo=sqlite&logoColor=white)
 ![Frontend](https://img.shields.io/badge/frontend-no--build%20vanilla%20JS-F7DF1E?logo=javascript&logoColor=black)
+![License](https://img.shields.io/badge/license-Elastic%202.0-0377CC)
 
 ---
 
@@ -195,4 +196,13 @@ Historical employee data in the public test fixtures is pseudonymized.
 
 ## License
 
-No license is granted. This repository is published for reference; all rights reserved.
+TipPool is licensed under the [Elastic License 2.0](LICENSE) (ELv2):
+
+- **You may** use, copy, modify, and self-host the software — including running
+  it for your own restaurant — free of charge, provided the copyright and
+  license notices are preserved.
+- **You may not** provide the software to third parties as a hosted or managed
+  service, or resell it as a commercial offering. That right is reserved by the
+  copyright holder.
+
+Copyright © 2026 Saulo Cruz.

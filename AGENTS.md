@@ -43,6 +43,11 @@ with:
   `.env.example`, live SQLite data/backups, `.claude/`, `.codex/`, caches,
   logs, and archive bundles. Before pushing, inspect the staged files and run a
   secret scan; never commit venue data or real Square/admin credentials.
+- **License (2026-07-07):** Elastic License 2.0 (`LICENSE`, owner decision) —
+  free use/copy/modify/self-host with notices preserved; providing the software
+  as a hosted/managed service or commercial offering is reserved to the owner
+  (keeps a future monetization path). Never remove or weaken the license or
+  copyright notices.
 - **Version control workflow:** this repo lives at
   `https://github.com/SauloCruz/TipPool`. Every AI agent and developer must work
   from git, pull the latest `main` before starting when possible, keep changes
