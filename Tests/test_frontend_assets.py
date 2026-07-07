@@ -1,7 +1,7 @@
 """Smoke tests for the no-build frontend after the Daily Review stepper
 redesign. The suite has no DOM runner, so these assert the served assets
 carry the structures the design handoff requires — route registration,
-fallback route, stepper markup generators, and the no-steppers rule."""
+stepper markup generators, and the no-steppers rule."""
 
 import re
 from pathlib import Path
@@ -47,21 +47,16 @@ class TestRoutes:
 
     def test_lf_save_preserves_hidden_pulled_inputs(self):
         lf_screen = APP_JS.split("async function renderDayLF(")[1].split(
-            "async function renderDayLegacy(")[0]
+            "/* ---------- period dashboard ---------- */")[0]
         assert "hours: { ...(inputs.hours || {}) }" in lf_screen
         assert "server_tips: { ...(inputs.server_tips || {}) }" in lf_screen
         assert "delete out.hours[id]" in lf_screen
 
-    def test_fallback_route_registered(self):
-        m = re.search(r"const routes = \{(.*?)\};", APP_JS, re.S)
-        assert '"day-classic": renderDayLegacy' in m.group(1)
-
-    def test_legacy_screen_preserved_and_cross_linked(self):
-        assert "async function renderDayLegacy" in APP_JS
-        assert "Try new view" in APP_JS      # legacy -> stepper
-        assert "Use classic view" in APP_JS  # stepper -> legacy
-        # legacy's own nav must stay on the classic route
-        assert "#/day-classic/${dateInput.value}" in APP_JS
+    def test_legacy_daily_review_retired(self):
+        # Retired 2026-07-07 (owner) — the stepper is the only day screen.
+        assert "day-classic" not in APP_JS
+        assert "renderDayLegacy" not in APP_JS
+        assert "classic view" not in APP_JS
 
 
 class TestStepperStructure:
@@ -85,10 +80,9 @@ class TestStepperStructure:
 
     def test_no_hour_steppers_in_new_screen(self):
         """Owner ruling: decimal keypad only — the stepper screen must not
-        create ±0.25 bump buttons. (They may still exist in the legacy
-        fallback, which is deleted after one pay period.)"""
+        create ±0.25 bump buttons."""
         new_screen = APP_JS.split("async function renderDay(")[1].split(
-            "async function renderDayLegacy(")[0]
+            "async function renderDayLF(")[0]
         assert "0.25" not in new_screen
         assert 'inputmode: "decimal"' in new_screen
 

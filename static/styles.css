@@ -113,10 +113,6 @@ label { display: block; font-weight: 600; margin: 12px 0 4px; }
 .money input { padding-left: 26px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- day screen ---------- */
-.datebar { display: flex; gap: 8px; align-items: center; margin: 8px 0 4px; }
-.datebar input { flex: 1; }
-.datebar button { min-width: 48px; }
-
 .staffrow {
   display: flex; align-items: center; justify-content: space-between;
   gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line);
@@ -124,9 +120,6 @@ label { display: block; font-weight: 600; margin: 12px 0 4px; }
 .staffrow:last-child { border-bottom: 0; }
 
 .staffrow .name { flex: 1; font-weight: 600; }
-.hourctl { display: flex; align-items: center; gap: 6px; }
-.hourctl input { width: 74px; text-align: center; padding: 8px; }
-.hourctl button { min-width: 44px; min-height: 44px; padding: 0; font-size: 1.2rem; }
 
 .check {
   display: flex; align-items: center; gap: 12px; padding: 12px 4px;

@@ -123,7 +123,7 @@ Deliberately boring, in the best way:
 engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, window clipping)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
-Tests/      301 tests: golden days, engine properties, API contracts, sync, RBAC
+Tests/      307 tests: golden days, engine properties, API contracts, sync, RBAC
 ```
 
 Schema migrations are versioned and applied automatically at boot (currently **v7**).
@@ -180,7 +180,7 @@ working on the app should use git from the start of the task:
 **In production at two venues.** Daily entries, Square pulls, finalized snapshots, weekly
 cash payouts, and monthly payroll exports are live. The engine's golden-file suite
 reproduces three historical pay periods from the original spreadsheet to the cent, and
-the full suite stands at **301 passing tests**.
+the full suite stands at **307 passing tests**.
 
 Historical employee data in the public test fixtures is pseudonymized.
 
@@ -188,8 +188,8 @@ Historical employee data in the public test fixtures is pseudonymized.
 
 - [x] **Printable period summary** — print/save-as-PDF report with signature line
 - [x] **IRS Form 4070 facsimiles** — per-employee monthly tip reports (tip-out venues)
-- [ ] **Historical importer** — load past spreadsheet periods as finalized history (under evaluation)
-- [ ] **Retire the legacy Daily Review** once the stepper has run a full pay period
+- [x] **Retire the legacy Daily Review** — removed; the stepper is the only day screen
+- ~~**Historical importer**~~ — dropped: the app went live with real data, so back-loading spreadsheet history is unnecessary
 - [ ] **Hosted deployment** — the app is containerization-ready; hosting is config-only
 - [ ] Per-shift pooling and role-weighted points (modeled for, not built)
 

@@ -281,3 +281,5 @@ Ship M2 to real use before building M3 — it already beats the spreadsheet.
 | LF no-host flag threshold (2026-07-06) | The no-host re-split itself is routine (low season runs with fewer bussers) and shows only as a reminder. A day is FLAGGED only when no host worked AND fewer than N bussers worked — N configurable in Setup (`lf_no_host_min_bussers`, default 3). |
 | Export footer note (2026-07-06) | The "review with bookkeeper (CBS)" footer is removed from all exports/screens per owner request. (Supersedes §6.) |
 | LF salaried BOH (2026-07-06) | Kitchen staff flagged **always in pool** (chef Elpidio Torralba — salaried, never clocks in) are pre-selected on the monthly kitchen roster regardless of timecards. Stored rosters are never silently changed by the flag. |
+| Historical Excel import (2026-07-07) | **Dropped.** The app went live with real data; back-loading spreadsheet history is unnecessary. Do not build the §5 importer. Golden-file tests (already extracted) stay. |
+| Legacy Daily Review (2026-07-07) | **Retired.** `#/day-classic` route, `renderDayLegacy`, and cross-links removed; the stepper is the only day screen. Do not reintroduce. |

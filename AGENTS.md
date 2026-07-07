@@ -26,8 +26,8 @@ with:
   pretty-printed and word-wrapped, with a stacked layout on small screens.
   API: `GET /api/audit-log`.
 - **Frontend:** no-build vanilla JS in `static/app.js`; do not introduce a
-  build step casually. The Daily screen has the newer stepper plus classic
-  fallback route.
+  build step casually. The Daily screen is the stepper only — the classic
+  `#/day-classic` fallback was retired 2026-07-07 (owner). Do not reintroduce it.
 - **Print views (2026-07-07):** `#/print-summary/{anchor}` (signable period
   report, both venues — closes the M4 PDF summary via browser print-to-PDF)
   and `#/print-4070/{anchor}` (IRS Form 4070 facsimile per employee, LF
@@ -35,7 +35,7 @@ with:
   intentionally never stored — blank for hand-fill. Gratuity excluded from
   the 4070 (wages, not tips). Buttons live on the Export screen.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **308 tests**.
+  **307 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.
@@ -291,8 +291,11 @@ Build these as assertions/warnings, not legal advice:
    pay period dashboard, CSV export. Usable in production without Square.
 3. **M3 — Square sync:** category & job mappings, per-day pull, override flow,
    nightly sync.
-4. **M4 — Polish:** audit log and role-based auth are implemented; PDF summary
-   and historical Excel import remain pending.
+4. **M4 — Polish:** audit log, role-based auth, and the printable summary are
+   implemented. Historical Excel import was DROPPED (owner, 2026-07-07) — the
+   app went live with real data, so back-loading spreadsheet history is
+   unnecessary. §5's importer spec is retained for reference only; do not
+   build it.
 
 Ship M2 to real use before building M3 — it already beats the spreadsheet.
 
@@ -336,3 +339,5 @@ Ship M2 to real use before building M3 — it already beats the spreadsheet.
 | LF no-host flag threshold (2026-07-06) | The no-host re-split itself is routine (low season runs with fewer bussers) and shows only as a reminder. A day is FLAGGED only when no host worked AND fewer than N bussers worked — N configurable in Setup (`lf_no_host_min_bussers`, default 3). |
 | Export footer note (2026-07-06) | The "review with bookkeeper (CBS)" footer is removed from all exports/screens per owner request. (Supersedes §6.) |
 | LF salaried BOH (2026-07-06) | Kitchen staff flagged **always in pool** (chef Elpidio Torralba — salaried, never clocks in) are pre-selected on the monthly kitchen roster regardless of timecards. Stored rosters are never silently changed by the flag. |
+| Historical Excel import (2026-07-07) | **Dropped.** The app went live with real data; back-loading spreadsheet history is unnecessary. Do not build the §5 importer. Golden-file tests (already extracted) stay. |
+| Legacy Daily Review (2026-07-07) | **Retired.** `#/day-classic` route, `renderDayLegacy`, and cross-links removed; the stepper is the only day screen. Do not reintroduce. |
