@@ -30,7 +30,7 @@ from . import settings_store, sync
 from .compute import (EMPTY_INPUTS_BY_MODEL, DayValidationError,
                       compute_lf_outputs, compute_outputs)
 from .config import Settings
-from .db import audit, connect, init_db, utcnow
+from .db import SCHEMA_VERSION, audit, connect, init_db, utcnow
 from .periods import (VENUE_SCHEMES, next_period_scheme, period_days,
                       period_for_scheme, prev_period_scheme)
 from .square import SquareClient, SquareError
@@ -240,6 +240,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Tavern Law Tip Pool", docs_url=None, redoc_url=None,
                   lifespan=lifespan)
     app.state.settings = settings
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():
+        """Container/platform health check: verifies the app can open SQLite."""
+        conn = connect(settings.db_path)
+        try:
+            db_version = conn.execute("PRAGMA user_version").fetchone()[0]
+            conn.execute("SELECT 1").fetchone()
+        finally:
+            conn.close()
+        return {"ok": True, "schema_version": db_version or SCHEMA_VERSION}
+
     # overridable in tests: swaps the real Square client for a fake.
     # Per-venue credentials (M5): tokens are never mixed across venues.
     def _real_square_client(venue_slug: str) -> SquareClient:

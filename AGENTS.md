@@ -34,8 +34,15 @@ with:
   monthly only; data from `GET /api/periods/{anchor}/form4070`). SSN/address
   intentionally never stored — blank for hand-fill. Gratuity excluded from
   the 4070 (wages, not tips). Buttons live on the Export screen.
+- **Container prep (2026-07-07):** Docker support is one app container plus one
+  persistent SQLite volume. Files: `Dockerfile`, `.dockerignore`,
+  `docker-compose.yml`; health endpoint: `GET /healthz` opens SQLite and
+  returns schema version. Local Compose uses named volume `tippool-data` and
+  forces `NIGHTLY_SYNC=0` so smoke tests do not pull Square automatically.
+  Run exactly one app container per SQLite volume; do not scale replicas while
+  the in-process nightly sync loop exists.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **309 tests**.
+  **310 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.

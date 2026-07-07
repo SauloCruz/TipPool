@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    image: tippool:local
+    ports:
+      - "8377:8377"
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8377
+      DATA_DIR: /data
+      DB_PATH: /data/tippool.sqlite3
+      # Local container smoke tests should never pull Square automatically.
+      # Enable this only in a real deployment after backup/monitoring is set.
+      NIGHTLY_SYNC: "0"
+    volumes:
+      - tippool-data:/data
+    restart: unless-stopped
+
+volumes:
+  tippool-data:

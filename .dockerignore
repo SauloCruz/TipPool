@@ -1,0 +1,43 @@
+# Git and local metadata
+.git/
+.github/
+.DS_Store
+.claude/
+.codex/
+.agents/
+
+# Secrets and live data
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+# Python/runtime caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test/dev-only material not needed in the runtime image
+Tests/
+conftest.py
+pyproject.toml
+assets/
+docs/
+design_handoff_daily_review/
+
+# Generated/local output
+*.log
+coverage.xml
+htmlcov/
+dist/
+build/
+*.zip
+*.tar
+*.tar.gz
+*.local.json

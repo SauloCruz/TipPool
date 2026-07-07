@@ -130,7 +130,7 @@ Deliberately boring, in the best way:
 engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, window clipping)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
-Tests/      309 tests: golden days, engine properties, API contracts, sync, RBAC
+Tests/      310 tests: golden days, engine properties, API contracts, sync, RBAC
 ```
 
 Schema migrations are versioned and applied automatically at boot (currently **v7**).
@@ -165,6 +165,39 @@ will refuse to guess at anything unmapped.
 
 ---
 
+## Local container test
+
+Docker support is intentionally simple: one FastAPI/Uvicorn container and one persistent
+SQLite volume. Local Compose runs use a named volume (`tippool-data`) and set
+`NIGHTLY_SYNC=0`, so smoke tests do not touch your live `data/tippool.sqlite3` or pull
+from Square automatically.
+
+```bash
+cp .env.example .env     # if you do not already have one
+# edit ADMIN_EMAIL and ADMIN_PASSWORD
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+Open <http://127.0.0.1:8377>. The container health check calls `/healthz`, which verifies
+the app can open the SQLite database.
+
+Useful commands:
+
+| Command | What it does |
+|---|---|
+| `docker compose logs -f app` | Follow app logs |
+| `docker compose exec app python -m app.backup` | Create an online SQLite backup inside the mounted volume |
+| `docker compose restart app` | Restart without deleting data |
+| `docker compose down` | Stop the container and keep the named volume |
+| `docker compose down -v` | Stop and delete the local test volume |
+
+For production, run exactly one app container per SQLite volume. Enable `NIGHTLY_SYNC`
+only after persistent storage, backups, and monitoring are in place.
+
+---
+
 ## Development workflow
 
 This repository is the source of truth at
@@ -187,7 +220,7 @@ working on the app should use git from the start of the task:
 **In production at two venues.** Daily entries, Square pulls, finalized snapshots, weekly
 cash payouts, and monthly payroll exports are live. The engine's golden-file suite
 reproduces three historical pay periods from the original spreadsheet to the cent, and
-the full suite stands at **309 passing tests**.
+the full suite stands at **310 passing tests**.
 
 Historical employee data in the public test fixtures is pseudonymized.
 
@@ -196,6 +229,7 @@ Historical employee data in the public test fixtures is pseudonymized.
 - [x] **Printable period summary** — print/save-as-PDF report with signature line
 - [x] **IRS Form 4070 facsimiles** — per-employee monthly tip reports (tip-out venues)
 - [x] **Retire the legacy Daily Review** — removed; the stepper is the only day screen
+- [x] **Local container smoke-test path** — Dockerfile, Compose, persistent test volume, health check
 - ~~**Historical importer**~~ — dropped: the app went live with real data, so back-loading spreadsheet history is unnecessary
 - [ ] **Hosted deployment** — the app is containerization-ready; hosting is config-only
 - [ ] Per-shift pooling and role-weighted points (modeled for, not built)

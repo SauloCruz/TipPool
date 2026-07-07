@@ -74,6 +74,12 @@ def day_inputs(ids, **over):
 
 
 class TestStaticCaching:
+    def test_healthz_checks_database(self, client):
+        r = client.get("/healthz")
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["schema_version"] >= 7
+
     def test_static_assets_revalidate(self, client):
         """No-build SPA: stale cached CSS against new JS renders broken
         layouts. Assets must be served no-cache (revalidate every load)."""
