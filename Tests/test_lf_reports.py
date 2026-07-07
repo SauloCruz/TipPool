@@ -318,3 +318,53 @@ class TestNoHostRulingViaAPI:
         # kitchen slice carries to the monthly pool
         assert "Enzo" not in people
         assert c["totals"]["pool_boh_cents"] == 500
+
+
+class TestForm4070:
+    """IRS Form 4070-style monthly per-employee data (LF only): cash tips,
+    card tips, tips paid out to others, net. Gratuity excluded; finalized
+    days only; kitchen from the stored monthly roster."""
+
+    def test_monthly_aggregation(self, client, lf):
+        r = client.get("/api/periods/2026-07-10/form4070", headers=lf["H"])
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["month_label"] == "July 2026"
+        forms = {f["name"]: f for f in body["forms"]}
+
+        # Maria (server): two finalized no-host days, all card, no cash yet
+        maria = forms["Maria"]
+        assert maria["card_tips_cents"] == 30001
+        assert maria["cash_tips_cents"] == 0
+        # paid out = 35% effective (30 busser + 5 boh): 7000 + 3500
+        assert maria["paid_out_cents"] == 10500
+        assert maria["net_tips_cents"] == 30001 - 10500  # == her keep
+
+        # Gio (busser): weekly cash pool shares count as cash tips received
+        gio = forms["Gio"]
+        assert gio["cash_tips_cents"] == 9000
+        assert gio["card_tips_cents"] == 0
+        assert gio["paid_out_cents"] == 0
+        assert gio["net_tips_cents"] == 9000
+
+        # Enzo (kitchen): monthly pool share, paid cash at payroll
+        enzo = forms["Enzo"]
+        assert enzo["cash_tips_cents"] == 1500
+        assert enzo["net_tips_cents"] == 1500
+
+        # per-form identity: net == cash + card - paid_out
+        for f in body["forms"]:
+            assert f["net_tips_cents"] == (f["cash_tips_cents"]
+                                           + f["card_tips_cents"]
+                                           - f["paid_out_cents"])
+
+    def test_draft_days_excluded_and_counted(self, client, lf):
+        body = client.get("/api/periods/2026-07-10/form4070",
+                          headers=lf["H"]).json()
+        assert body["finalized_days"] == 2
+        assert body["draft_or_missing_days"] == 29  # July has 31 days
+
+    def test_pooled_model_venue_rejected(self, client, lf):
+        r = client.get("/api/periods/2026-07-10/form4070")  # Tavern Law
+        assert r.status_code == 422
+        assert "pooled" in r.json()["detail"]

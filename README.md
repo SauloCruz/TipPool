@@ -91,6 +91,10 @@ different tax treatment, separate payroll line, never merged.
 - **CSV exports** with component columns (keep vs. pool share vs. returned vs. gratuity)
   so every number on the report can be traced back to its rule.
 - A prominent **"Cash to pay out"** total — the exact figure to withdraw from the bank.
+- **Print views** (browser print-to-PDF, no dependencies): a signable period summary
+  for any venue, and per-employee **IRS Form 4070 facsimiles** for tip-out venues —
+  cash tips, card tips, tips paid out, and net tips per month, with SSN/address left
+  blank for the employee to complete by hand.
 
 ### Trust & audit
 
@@ -182,7 +186,8 @@ Historical employee data in the public test fixtures is pseudonymized.
 
 ## Roadmap
 
-- [ ] **PDF period summary** — printable, signable report alongside the CSV export
+- [x] **Printable period summary** — print/save-as-PDF report with signature line
+- [x] **IRS Form 4070 facsimiles** — per-employee monthly tip reports (tip-out venues)
 - [ ] **Historical importer** — load past spreadsheet periods as finalized history (under evaluation)
 - [ ] **Retire the legacy Daily Review** once the stepper has run a full pay period
 - [ ] **Hosted deployment** — the app is containerization-ready; hosting is config-only

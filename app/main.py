@@ -377,6 +377,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "SELECT * FROM day WHERE venue_id = ? AND date = ?", (venue_id, d.isoformat())
         ).fetchone()
 
+    def snapshot_record(conn, day_id: int) -> tuple[dict, dict] | None:
+        row = conn.execute(
+            "SELECT inputs_json, outputs_json FROM day_snapshot WHERE day_id = ?"
+            " ORDER BY version DESC LIMIT 1",
+            (day_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row["inputs_json"]), json.loads(row["outputs_json"])
+
     def snapshot_outputs(conn, day_id: int) -> dict | None:
         row = conn.execute(
             "SELECT outputs_json FROM day_snapshot WHERE day_id = ?"
@@ -1327,6 +1337,88 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                  finalized_only=True,
                                  scheme=resolve_scheme(venue, scheme))
         return summary
+
+    @app.get("/api/periods/{anchor}/form4070")
+    def form_4070(anchor: str, user: User, conn: DB, venue: Venue):
+        """IRS Form 4070-style monthly data per employee (La Fontana only —
+        the tip-out model tracks who received what; the pooled model
+        deliberately doesn't). Finalized days only. Auto-gratuity excluded
+        (service charges are wages, not tips). Amounts are exact tips before
+        any cash round-up. SSN/address are intentionally never stored."""
+        if venue["tip_model"] != "PERCENT_TIPOUT":
+            raise HTTPException(
+                422, "Form 4070 reports are only available for tip-out venues;"
+                     " the pooled model does not track individual tip receipt")
+        d = parse_date(anchor)
+        start, end = period_for_scheme(d, "monthly")
+        emps = employees_map(conn, venue["id"])
+        rows = conn.execute(
+            "SELECT * FROM day WHERE venue_id = ? AND date BETWEEN ? AND ?"
+            " AND status = 'finalized' ORDER BY date",
+            (venue["id"], start.isoformat(), end.isoformat()),
+        ).fetchall()
+        agg: dict[int, dict] = {}
+
+        def entry(eid: int) -> dict:
+            return agg.setdefault(eid, {
+                "employee_id": eid,
+                "name": emps[eid]["display_name"],
+                "role": emps[eid]["pool_role"],
+                "cash_tips_cents": 0, "card_tips_cents": 0,
+                "paid_out_cents": 0,
+            })
+
+        finalized_dates = []
+        for row in rows:
+            rec = snapshot_record(conn, row["id"])
+            if rec is None:
+                continue
+            inputs, outputs = rec
+            if outputs.get("model") != "PERCENT_TIPOUT":
+                continue
+            finalized_dates.append(row["date"])
+            cash_by = {int(k): v for k, v in
+                       inputs.get("server_cash_tips", {}).items()}
+            for p in outputs["people"]:
+                eid = p["employee_id"]
+                if eid not in emps:
+                    continue
+                e = entry(eid)
+                if p["role"] == "SERVER":
+                    cash = cash_by.get(eid, 0)
+                    e["cash_tips_cents"] += cash
+                    e["card_tips_cents"] += p["tips_cents"] - cash
+                    e["paid_out_cents"] += (p["tips_cents"] - p["keep_cents"]
+                                            - p["returned_cents"])
+                else:
+                    # busser/host pool shares are paid in cash weekly
+                    e["cash_tips_cents"] += p["pool_share_cents"]
+        # kitchen: the monthly pool split (paid in cash at payroll time)
+        summary = period_summary(conn, venue, start, finalized_only=True,
+                                 scheme="monthly")
+        bm = summary.get("boh_monthly") or {}
+        for eid_str, share in (bm.get("shares") or {}).items():
+            eid = int(eid_str)
+            if eid in emps:
+                entry(eid)["cash_tips_cents"] += share
+
+        forms = []
+        for e in sorted(agg.values(), key=lambda x: (x["role"], x["name"])):
+            net = e["cash_tips_cents"] + e["card_tips_cents"] - e["paid_out_cents"]
+            if e["cash_tips_cents"] == 0 and e["card_tips_cents"] == 0:
+                continue  # nothing to report
+            forms.append({**e, "net_tips_cents": net})
+        audit(conn, venue["id"], user["id"], "form4070_generated", "period",
+              start.isoformat())
+        conn.commit()
+        return {
+            "venue": {"name": venue["name"]},
+            "month_label": start.strftime("%B %Y"),
+            "start": start.isoformat(), "end": end.isoformat(),
+            "finalized_days": len(finalized_dates),
+            "draft_or_missing_days": (end - start).days + 1 - len(finalized_dates),
+            "forms": forms,
+        }
 
     @app.get("/api/periods/{anchor}/export.csv")
     def export_csv(anchor: str, user: User, conn: DB, venue: Venue,

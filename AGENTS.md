@@ -28,8 +28,14 @@ with:
 - **Frontend:** no-build vanilla JS in `static/app.js`; do not introduce a
   build step casually. The Daily screen has the newer stepper plus classic
   fallback route.
+- **Print views (2026-07-07):** `#/print-summary/{anchor}` (signable period
+  report, both venues — closes the M4 PDF summary via browser print-to-PDF)
+  and `#/print-4070/{anchor}` (IRS Form 4070 facsimile per employee, LF
+  monthly only; data from `GET /api/periods/{anchor}/form4070`). SSN/address
+  intentionally never stored — blank for hand-fill. Gratuity excluded from
+  the 4070 (wages, not tips). Buttons live on the Export screen.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **301 tests** after the GitHub publish safety prep.
+  **308 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.

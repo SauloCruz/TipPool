@@ -87,6 +87,8 @@ const routes = {
   settings: renderSettings,
   users: renderUsers,
   audit: renderAudit,
+  "print-summary": renderPrintSummary,   // M4: printable/signable period report
+  "print-4070": renderPrint4070,         // LF: Form 4070 facsimile per employee
 };
 
 function renderDayDispatch(dateArg) {
@@ -154,7 +156,8 @@ async function route() {
     if (a.hasAttribute("data-super")) a.style.display = ME?.super_admin ? "" : "none";
   });
   view.textContent = "";
-  view.className = name === "audit" ? "auditpage" : "";
+  view.className = name === "audit" ? "auditpage"
+    : name.startsWith("print-") ? "printpage" : "";
   try { await fn(arg); } catch (e) { toast(e.message, true); }
 }
 
@@ -1791,7 +1794,19 @@ async function renderExport(anchorArg) {
     a.click();
     URL.revokeObjectURL(a.href);
   });
-  view.append(el("div", { class: "row" }, dl));
+  const printSummaryBtn = el("button", { class: "ghost" }, "🖨 Print summary");
+  printSummaryBtn.addEventListener("click", () => {
+    location.hash = `#/print-summary/${p.start}`;
+  });
+  const rowBtns = [dl, printSummaryBtn];
+  if (p.model === "PERCENT_TIPOUT" && p.scheme === "monthly") {
+    const f4070Btn = el("button", { class: "ghost" }, "🖨 Form 4070 (per employee)");
+    f4070Btn.addEventListener("click", () => {
+      location.hash = `#/print-4070/${p.start}`;
+    });
+    rowBtns.push(f4070Btn);
+  }
+  view.append(el("div", { class: "row", style: "flex-wrap:wrap" }, ...rowBtns));
 }
 
 /* ---------- users (super admin) ---------- */
@@ -1899,6 +1914,167 @@ async function renderUsers() {
       el("div", { style: "margin-top:12px" }, save),
       self ? el("div", { class: "note" },
         "You cannot deactivate yourself or remove your own Super Admin access.") : null));
+  }
+}
+
+/* ---------- print views (M4 summary + Form 4070) ---------- */
+
+function printBar(backHash) {
+  const printBtn = el("button", {}, "Print / Save as PDF");
+  printBtn.addEventListener("click", () => window.print());
+  return el("div", { class: "printbar" },
+    el("button", { class: "ghost small", onclick: () => { location.hash = backHash; } }, "‹ Back"),
+    el("span", { class: "hint" }, 'Use the print dialog\'s "Save as PDF" for a file.'),
+    printBtn);
+}
+
+async function renderPrintSummary(anchorArg) {
+  const anchor = anchorArg || ME.today;
+  const saved = sessionStorage.getItem("reportScheme:" + sessionStorage.getItem("venueId"));
+  const p = await api(`/api/periods/${anchor}/export${saved ? `?scheme=${saved}` : ""}`);
+  view.append(printBar(`#/export/${anchor}`));
+  if (p.draft_dates.length) {
+    view.append(el("div", { class: "flag" },
+      `${p.draft_dates.length} day(s) not finalized and excluded: ${p.draft_dates.join(", ")}`));
+  }
+  const isLF = p.model === "PERCENT_TIPOUT";
+  const weekly = p.scheme === "weekly";
+  const sheet = el("div", { class: "sheet" },
+    el("div", { class: "sheethead" },
+      el("div", {}, el("h2", {}, `${p.venue.name} — Tip Distribution Summary`),
+        el("div", { class: "subtle" }, `${SCHEME_LABEL[p.scheme] || p.scheme} · ${p.start} to ${p.end}`)),
+      el("div", { class: "subtle" }, `Generated ${new Date().toLocaleString()}`)));
+
+  const t = p.totals;
+  const totalsTable = el("table", {},
+    el("tbody", {},
+      el("tr", {}, el("td", {}, "Total tips"), el("td", { class: "num" }, fmt(t.total_tips_cents))),
+      ...(isLF ? [
+        el("tr", {}, el("td", {}, "Busser pool"), el("td", { class: "num" }, fmt(t.pool_busser_cents || 0))),
+        el("tr", {}, el("td", {}, "Host pool"), el("td", { class: "num" }, fmt(t.pool_host_cents || 0))),
+        el("tr", {}, el("td", {}, "Kitchen pool (monthly)"), el("td", { class: "num" }, fmt(t.pool_boh_cents || 0))),
+      ] : [
+        el("tr", {}, el("td", {}, "Kitchen share"), el("td", { class: "num" }, fmt(t.boh_allocation_cents || 0))),
+        el("tr", {}, el("td", {}, "FOH pool"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),
+      ]),
+      el("tr", {}, el("td", {}, "Auto-gratuity (wages line)"), el("td", { class: "num" }, fmt(t.auto_gratuity_cents))),
+      ...(weekly && t.total_cash_payout_cents !== undefined ? [
+        el("tr", { class: "total" }, el("td", {}, "Cash to pay out"),
+          el("td", { class: "num" }, fmt(t.total_cash_payout_cents))),
+      ] : [])));
+  sheet.append(el("h3", {}, "Totals"), totalsTable);
+
+  const head = isLF
+    ? el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Keep"),
+        el("th", { class: "num" }, "Pool/Ret"), el("th", { class: "num" }, "Tips"),
+        ...(weekly ? [el("th", { class: "num" }, "Cash paid"), el("th", { class: "num" }, "Round-up")] : []),
+        el("th", { class: "num" }, "Gratuity"))
+    : el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
+        el("th", { class: "num" }, "Gratuity"), el("th", { class: "num" }, "Days"),
+        el("th", { class: "num" }, "Hours"));
+  const body = el("tbody", {});
+  for (const s of p.employees) {
+    body.append(isLF
+      ? el("tr", {}, el("td", {}, esc(s.name)), el("td", { class: "num" }, fmt(s.keep_cents)),
+          el("td", { class: "num" }, fmt(s.pool_share_cents + s.returned_cents)),
+          el("td", { class: "num" }, fmt(s.tips_cents)),
+          ...(weekly ? [el("td", { class: "num" }, fmt(s.cash_payout_cents)),
+                        el("td", { class: "num" }, fmt(s.roundup_cents))] : []),
+          el("td", { class: "num" }, fmt(s.gratuity_cents)))
+      : el("tr", {}, el("td", {}, esc(s.name)),
+          el("td", { class: "num" }, fmt(s.tips_cents + s.boh_cents)),
+          el("td", { class: "num" }, fmt(s.gratuity_cents)),
+          el("td", { class: "num" }, s.days),
+          el("td", { class: "num" }, s.hours ? s.hours.toFixed(2) : "—")));
+  }
+  sheet.append(el("h3", {}, "Per employee"), el("table", {}, el("thead", {}, head), body));
+
+  if (p.boh_monthly && p.boh_monthly.shares && Object.keys(p.boh_monthly.shares).length) {
+    const bm = p.boh_monthly;
+    const kBody = el("tbody", {});
+    for (const m of bm.members) {
+      if (m.share_cents === undefined) continue;
+      kBody.append(el("tr", {}, el("td", {}, esc(m.name)),
+        el("td", { class: "num" }, fmt(m.share_cents)),
+        el("td", { class: "num" }, fmt(m.cash_payout_cents)),
+        el("td", { class: "num" }, fmt(m.roundup_cents))));
+    }
+    kBody.append(el("tr", { class: "total" }, el("td", {}, "Kitchen cash to pay"),
+      el("td", {}), el("td", { class: "num" }, fmt(bm.total_cash_payout_cents)),
+      el("td", { class: "num" }, fmt(bm.total_roundup_cents))));
+    sheet.append(el("h3", {}, `Kitchen monthly payout (pool ${fmt(bm.allocation_cents)})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        el("th", {}, "Employee"), el("th", { class: "num" }, "Share"),
+        el("th", { class: "num" }, "Cash payout"), el("th", { class: "num" }, "Round-up"))), kBody));
+  }
+
+  sheet.append(el("div", { class: "sigrow" },
+    el("div", {}, el("span", { class: "fieldlabel" }, "Reviewed and approved:"),
+      el("span", { class: "blank" })),
+    el("div", {}, el("span", { class: "fieldlabel", style: "min-width:auto" }, "Date:"),
+      el("span", { class: "blank short" }))));
+  sheet.append(el("div", { class: "footnote" },
+    "Finalized days only. Auto-gratuity (service charges) is reported as wages, separate from tips."));
+  view.append(sheet);
+}
+
+async function renderPrint4070(anchorArg) {
+  const anchor = anchorArg || ME.today;
+  const data = await api(`/api/periods/${anchor}/form4070`);
+  view.append(printBar(`#/export/${anchor}`));
+  if (data.draft_or_missing_days > 0) {
+    view.append(el("div", { class: "flag" },
+      `${data.draft_or_missing_days} day(s) of ${data.month_label} are not finalized — amounts below cover the ${data.finalized_days} finalized day(s) only.`));
+  }
+  if (!data.forms.length) {
+    view.append(el("div", { class: "card" },
+      el("div", { class: "note" }, "No tips to report for this month yet.")));
+    return;
+  }
+  for (const f of data.forms) {
+    view.append(el("div", { class: "sheet f4070" },
+      el("div", { class: "sheethead" },
+        el("div", {}, el("h2", {}, "Employee's Report of Tips to Employer"),
+          el("div", { class: "subtle" }, "Facsimile of IRS Form 4070 — for payroll records")),
+        el("div", { class: "subtle" }, data.month_label)),
+      el("div", { class: "fieldrow" },
+        el("span", { class: "fieldlabel" }, "Employee's name:"),
+        el("strong", {}, f.name)),
+      el("div", { class: "fieldrow" },
+        el("span", { class: "fieldlabel" }, "Social security number:"),
+        el("span", { class: "blank" })),
+      el("div", { class: "fieldrow" },
+        el("span", { class: "fieldlabel" }, "Address:"),
+        el("span", { class: "blank", style: "min-width:340px" })),
+      el("div", { class: "fieldrow" },
+        el("span", { class: "fieldlabel" }, ""),
+        el("span", { class: "blank", style: "min-width:340px" })),
+      el("div", { class: "fieldrow" },
+        el("span", { class: "fieldlabel" }, "Employer's name:"),
+        el("strong", {}, data.venue.name),
+        el("span", { class: "blank", style: "min-width:180px;margin-left:12px" })),
+      el("div", { class: "fieldrow" },
+        el("span", { class: "fieldlabel" }, "Month covered:"),
+        el("span", {}, `${data.start} to ${data.end}`)),
+      el("table", {}, el("tbody", {},
+        el("tr", {}, el("td", {}, "1  Cash tips received"),
+          el("td", { class: "num" }, fmt(f.cash_tips_cents))),
+        el("tr", {}, el("td", {}, "2  Credit and debit card tips received"),
+          el("td", { class: "num" }, fmt(f.card_tips_cents))),
+        el("tr", {}, el("td", {}, "3  Tips paid out to other employees"),
+          el("td", { class: "num" }, fmt(f.paid_out_cents))),
+        el("tr", { class: "total" }, el("td", {}, "4  Net tips (lines 1 + 2 − 3)"),
+          el("td", { class: "num" }, fmt(f.net_tips_cents))))),
+      el("div", { class: "sigrow" },
+        el("div", {}, el("span", { class: "fieldlabel" }, "Signature:"),
+          el("span", { class: "blank" })),
+        el("div", {}, el("span", { class: "fieldlabel", style: "min-width:auto" }, "Date:"),
+          el("span", { class: "blank short" }))),
+      el("div", { class: "footnote" },
+        "Amounts are exact tip earnings from finalized days, before any cash round-up. "
+        + "Auto-gratuity (service charges) is excluded — it is paid as wages, not tips. "
+        + "Tip-outs received by support staff are shown as cash tips (paid in cash). "
+        + "This facsimile is for record-keeping; verify filing requirements with your tax professional.")));
   }
 }
 

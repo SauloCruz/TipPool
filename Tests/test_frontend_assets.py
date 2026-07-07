@@ -99,6 +99,33 @@ class TestStepperStructure:
             assert re.search(token.replace(" ", r"[\s\S]{0,40}"), APP_JS), token
 
 
+class TestPrintViews:
+    def test_print_routes_registered(self):
+        m = re.search(r"const routes = \{(.*?)\};", APP_JS, re.S)
+        assert '"print-summary": renderPrintSummary' in m.group(1)
+        assert '"print-4070": renderPrint4070' in m.group(1)
+
+    def test_form_4070_structure(self):
+        for text in ["Employee's Report of Tips to Employer",
+                     "Facsimile of IRS Form 4070",
+                     "Social security number", "Tips paid out to other employees",
+                     "Net tips (lines 1 + 2 − 3)",
+                     "verify filing requirements"]:
+            assert text in APP_JS, text
+        # SSN/address are blank lines, never data-bound
+        assert "f.ssn" not in APP_JS and "f.address" not in APP_JS
+
+    def test_summary_sheet_structure(self):
+        for text in ["Tip Distribution Summary", "Reviewed and approved",
+                     "Print / Save as PDF"]:
+            assert text in APP_JS, text
+
+    def test_print_css(self):
+        for sel in [".sheet", ".printbar", "page-break-after: always",
+                    "@media print"]:
+            assert sel in CSS, sel
+
+
 class TestDesignTokens:
     def test_new_tokens_added(self):
         assert "--ok-tint" in CSS
