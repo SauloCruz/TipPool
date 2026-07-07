@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="static/logo.png" alt="TipPool — fair, transparent, together" width="220">
+</p>
+
 # TipPool
 
 **Multi-venue tip pool management for restaurants — correct to the cent, auditable to the keystroke.**
