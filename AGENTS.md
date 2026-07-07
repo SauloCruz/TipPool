@@ -35,7 +35,7 @@ with:
   intentionally never stored — blank for hand-fill. Gratuity excluded from
   the 4070 (wages, not tips). Buttons live on the Export screen.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **307 tests**.
+  **309 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.

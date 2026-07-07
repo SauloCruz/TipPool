@@ -80,6 +80,8 @@ different tax treatment, separate payroll line, never merged.
   that surfaces exactly what needs a decision and nothing else.
 - **Venue picker** gates the app; the active venue is pinned in the header so a day is
   never finalized against the wrong restaurant.
+- **Installable on iPhone** — "Add to Home Screen" launches TipPool full-screen with its
+  own icon (web app manifest + Apple touch icon), no app store required.
 - **Role-based access control**: managers handle daily entry for their venues, admins run
   setup and staff, and a super admin manages users and sees everything.
 - **Plain-English warnings** — "Every declared cash tip is $0 — possible skipped
@@ -128,7 +130,7 @@ Deliberately boring, in the best way:
 engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, window clipping)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
-Tests/      307 tests: golden days, engine properties, API contracts, sync, RBAC
+Tests/      309 tests: golden days, engine properties, API contracts, sync, RBAC
 ```
 
 Schema migrations are versioned and applied automatically at boot (currently **v7**).
@@ -185,7 +187,7 @@ working on the app should use git from the start of the task:
 **In production at two venues.** Daily entries, Square pulls, finalized snapshots, weekly
 cash payouts, and monthly payroll exports are live. The engine's golden-file suite
 reproduces three historical pay periods from the original spreadsheet to the cent, and
-the full suite stands at **307 passing tests**.
+the full suite stands at **309 passing tests**.
 
 Historical employee data in the public test fixtures is pseudonymized.
 

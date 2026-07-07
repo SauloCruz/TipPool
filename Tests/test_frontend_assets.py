@@ -3,12 +3,14 @@ redesign. The suite has no DOM runner, so these assert the served assets
 carry the structures the design handoff requires — route registration,
 stepper markup generators, and the no-steppers rule."""
 
+import json
 import re
 from pathlib import Path
 
 STATIC = Path(__file__).parent.parent / "static"
 APP_JS = (STATIC / "app.js").read_text()
 CSS = (STATIC / "styles.css").read_text()
+INDEX = (STATIC / "index.html").read_text()
 
 
 class TestRoutes:
@@ -118,6 +120,28 @@ class TestPrintViews:
         for sel in [".sheet", ".printbar", "page-break-after: always",
                     "@media print"]:
             assert sel in CSS, sel
+
+
+class TestAddToHomeScreen:
+    """iOS 'Add to Home Screen' as a standalone web app: Apple meta tags,
+    a touch icon, and a linked PWA manifest with the expected icon set."""
+
+    def test_index_head_tags(self):
+        for token in ['name="apple-mobile-web-app-capable" content="yes"',
+                      'name="apple-mobile-web-app-title" content="TipPool"',
+                      'name="apple-mobile-web-app-status-bar-style"',
+                      'rel="apple-touch-icon" href="/static/icon-180.png"',
+                      'rel="manifest" href="/static/manifest.webmanifest"']:
+            assert token in INDEX, token
+
+    def test_manifest_and_icons_present(self):
+        man = json.loads((STATIC / "manifest.webmanifest").read_text())
+        assert man["display"] == "standalone"
+        srcs = {i["src"] for i in man["icons"]}
+        assert {"/static/icon-192.png", "/static/icon-512.png"} <= srcs
+        assert any(i.get("purpose") == "maskable" for i in man["icons"])
+        for name in ("icon-180.png", "icon-192.png", "icon-512.png"):
+            assert (STATIC / name).exists(), name
 
 
 class TestDesignTokens:

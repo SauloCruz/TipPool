@@ -13,6 +13,7 @@ import contextlib
 import csv
 import io
 import json
+import mimetypes
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
@@ -1505,6 +1506,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def index():
         return FileResponse(STATIC_DIR / "index.html")
 
+    # Ensure the PWA manifest is served with the correct media type
+    # (Python's mimetypes doesn't know .webmanifest by default).
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app
