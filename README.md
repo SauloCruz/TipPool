@@ -193,6 +193,20 @@ Useful commands:
 | `docker compose down` | Stop the container and keep the named volume |
 | `docker compose down -v` | Stop and delete the local test volume |
 
+When importing an existing SQLite backup into the Docker volume, copy the database while
+the app is stopped, then repair volume ownership before starting the app:
+
+```bash
+docker compose down
+# copy the backup to /data/tippool.sqlite3 using docker compose cp or a helper container
+docker compose run --rm --user root --entrypoint sh app -c \
+  'chown -R app:app /data && chmod 700 /data && chmod 600 /data/tippool.sqlite3'
+docker compose up -d
+```
+
+This matters because helper containers usually copy files as `root`; the TipPool
+container runs as the unprivileged `app` user and SQLite must be writable by that user.
+
 For production, run exactly one app container per SQLite volume. Enable `NIGHTLY_SYNC`
 only after persistent storage, backups, and monitoring are in place.
 

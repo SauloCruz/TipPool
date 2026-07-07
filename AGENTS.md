@@ -39,6 +39,9 @@ with:
   `docker-compose.yml`; health endpoint: `GET /healthz` opens SQLite and
   returns schema version. Local Compose uses named volume `tippool-data` and
   forces `NIGHTLY_SYNC=0` so smoke tests do not pull Square automatically.
+  Imported SQLite backups may arrive in the volume as `root`; repair with
+  `chown -R app:app /data && chmod 700 /data && chmod 600 /data/tippool.sqlite3`
+  before startup or SQLite will fail with "unable to open database file".
   Run exactly one app container per SQLite volume; do not scale replicas while
   the in-process nightly sync loop exists.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
