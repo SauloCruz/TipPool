@@ -1,0 +1,2442 @@
+[
+ {
+  "source_tab": "6.30.26",
+  "period_start": "2026-06-16",
+  "period_end": "2026-06-30",
+  "days": [
+   {
+    "date": "2026-06-16",
+    "inputs": {
+     "food_sales": 530.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 622.47,
+     "cash_tips": 0.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-11",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-05": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 26.5,
+     "total_tips": 622.47,
+     "foh_pool": 595.97,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-03": 119.2,
+      "Staff-05": 119.2,
+      "Staff-08": 119.19,
+      "Staff-09": 119.19,
+      "Staff-12": 119.19
+     },
+     "gratuity_payouts": {
+      "Staff-03": 0.0,
+      "Staff-05": 0.0,
+      "Staff-08": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 8.84,
+      "Staff-11": 8.83,
+      "Staff-15": 8.83
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-17",
+    "inputs": {
+     "food_sales": 914.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 648.82,
+     "cash_tips": 18.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 97.6,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-06": 7.0,
+      "Staff-09": 7.0,
+      "Staff-14": 5.5,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 45.7,
+     "total_tips": 666.82,
+     "foh_pool": 621.12,
+     "auto_gratuity": 97.6,
+     "foh_payouts": {
+      "Staff-01": 129.79,
+      "Staff-06": 129.79,
+      "Staff-09": 129.79,
+      "Staff-14": 101.97,
+      "Staff-16": 129.78
+     },
+     "gratuity_payouts": {
+      "Staff-01": 20.4,
+      "Staff-06": 20.4,
+      "Staff-09": 20.39,
+      "Staff-14": 16.02,
+      "Staff-16": 20.39
+     },
+     "boh_payouts": {
+      "Staff-02": 15.24,
+      "Staff-07": 15.23,
+      "Staff-10": 15.23
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-18",
+    "inputs": {
+     "food_sales": 1277.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1169.66,
+     "cash_tips": 20.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 25.4,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-06": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-14": 7.0,
+      "Staff-19": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 63.85,
+     "total_tips": 1189.66,
+     "foh_pool": 1125.81,
+     "auto_gratuity": 25.4,
+     "foh_payouts": {
+      "Staff-01": 187.64,
+      "Staff-06": 187.64,
+      "Staff-08": 187.64,
+      "Staff-09": 187.63,
+      "Staff-14": 187.63,
+      "Staff-19": 187.63
+     },
+     "gratuity_payouts": {
+      "Staff-01": 4.24,
+      "Staff-06": 4.24,
+      "Staff-08": 4.23,
+      "Staff-09": 4.23,
+      "Staff-14": 4.23,
+      "Staff-19": 4.23
+     },
+     "boh_payouts": {
+      "Staff-02": 21.29,
+      "Staff-07": 21.28,
+      "Staff-10": 21.28
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-19",
+    "inputs": {
+     "food_sales": 1128.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1345.63,
+     "cash_tips": 59.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 108.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-06": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 56.4,
+     "total_tips": 1404.63,
+     "foh_pool": 1348.23,
+     "auto_gratuity": 108.0,
+     "foh_payouts": {
+      "Staff-03": 214.49,
+      "Staff-04": 214.49,
+      "Staff-06": 214.49,
+      "Staff-12": 214.49,
+      "Staff-16": 214.49,
+      "Staff-18": 214.49,
+      "Staff-20": 61.29
+     },
+     "gratuity_payouts": {
+      "Staff-03": 17.19,
+      "Staff-04": 17.18,
+      "Staff-06": 17.18,
+      "Staff-12": 17.18,
+      "Staff-16": 17.18,
+      "Staff-18": 17.18,
+      "Staff-20": 4.91
+     },
+     "boh_payouts": {
+      "Staff-02": 18.8,
+      "Staff-07": 18.8,
+      "Staff-10": 18.8
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-20",
+    "inputs": {
+     "food_sales": 1335.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1464.06,
+     "cash_tips": 40.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-06": 5.5,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 7.0,
+      "Staff-17": 2.5
+     }
+    },
+    "expected": {
+     "boh_allocation": 66.75,
+     "total_tips": 1504.06,
+     "foh_pool": 1437.31,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 233.98,
+      "Staff-06": 183.84,
+      "Staff-12": 233.98,
+      "Staff-16": 233.98,
+      "Staff-18": 233.98,
+      "Staff-20": 233.98,
+      "Staff-17": 83.57
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-06": 0.0,
+      "Staff-12": 0.0,
+      "Staff-16": 0.0,
+      "Staff-18": 0.0,
+      "Staff-20": 0.0,
+      "Staff-17": 0.0
+     },
+     "boh_payouts": {
+      "Staff-07": 22.25,
+      "Staff-10": 22.25,
+      "Staff-15": 22.25
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-21",
+    "inputs": {
+     "food_sales": 798.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 772.07,
+     "cash_tips": 73.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 30.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 39.9,
+     "total_tips": 845.07,
+     "foh_pool": 805.17,
+     "auto_gratuity": 30.2,
+     "foh_payouts": {
+      "Staff-04": 161.04,
+      "Staff-05": 161.04,
+      "Staff-09": 161.03,
+      "Staff-12": 161.03,
+      "Staff-16": 161.03
+     },
+     "gratuity_payouts": {
+      "Staff-04": 6.04,
+      "Staff-05": 6.04,
+      "Staff-09": 6.04,
+      "Staff-12": 6.04,
+      "Staff-16": 6.04
+     },
+     "boh_payouts": {
+      "Staff-02": 19.95,
+      "Staff-15": 19.95
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-22",
+    "inputs": {
+     "food_sales": 822.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 607.06,
+     "cash_tips": 65.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 52.8,
+     "boh_worked": [
+      "Staff-10",
+      "Staff-11"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-09": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 41.1,
+     "total_tips": 672.06,
+     "foh_pool": 630.96,
+     "auto_gratuity": 52.8,
+     "foh_payouts": {
+      "Staff-04": 157.74,
+      "Staff-05": 157.74,
+      "Staff-09": 157.74,
+      "Staff-16": 157.74
+     },
+     "gratuity_payouts": {
+      "Staff-04": 13.2,
+      "Staff-05": 13.2,
+      "Staff-09": 13.2,
+      "Staff-16": 13.2
+     },
+     "boh_payouts": {
+      "Staff-10": 20.55,
+      "Staff-11": 20.55
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-23",
+    "inputs": {
+     "food_sales": 690.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 677.02,
+     "cash_tips": 0.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-11",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-09": 5.75,
+      "Staff-12": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 34.5,
+     "total_tips": 677.02,
+     "foh_pool": 642.52,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-01": 133.27,
+      "Staff-04": 133.26,
+      "Staff-05": 133.26,
+      "Staff-09": 109.47,
+      "Staff-12": 133.26
+     },
+     "gratuity_payouts": {
+      "Staff-01": 0.0,
+      "Staff-04": 0.0,
+      "Staff-05": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 11.5,
+      "Staff-11": 11.5,
+      "Staff-15": 11.5
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-24",
+    "inputs": {
+     "food_sales": 820.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 599.23,
+     "cash_tips": 19.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 28.8,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-05": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 41.0,
+     "total_tips": 618.23,
+     "foh_pool": 577.23,
+     "auto_gratuity": 28.8,
+     "foh_payouts": {
+      "Staff-01": 144.31,
+      "Staff-05": 144.31,
+      "Staff-14": 144.31,
+      "Staff-18": 144.3
+     },
+     "gratuity_payouts": {
+      "Staff-01": 7.2,
+      "Staff-05": 7.2,
+      "Staff-14": 7.2,
+      "Staff-18": 7.2
+     },
+     "boh_payouts": {
+      "Staff-02": 13.67,
+      "Staff-07": 13.67,
+      "Staff-10": 13.66
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-25",
+    "inputs": {
+     "food_sales": 1187.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1087.82,
+     "cash_tips": 49.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 59.35,
+     "total_tips": 1136.82,
+     "foh_pool": 1077.47,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-01": 215.5,
+      "Staff-03": 215.5,
+      "Staff-04": 215.49,
+      "Staff-14": 215.49,
+      "Staff-18": 215.49
+     },
+     "gratuity_payouts": {
+      "Staff-01": 0.0,
+      "Staff-03": 0.0,
+      "Staff-04": 0.0,
+      "Staff-14": 0.0,
+      "Staff-18": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 19.79,
+      "Staff-07": 19.78,
+      "Staff-10": 19.78
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-26",
+    "inputs": {
+     "food_sales": 1241.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1272.29,
+     "cash_tips": 49.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 113.4,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-08": 7.0,
+      "Staff-12": 7.0,
+      "Staff-13": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 62.05,
+     "total_tips": 1321.29,
+     "foh_pool": 1259.24,
+     "auto_gratuity": 113.4,
+     "foh_payouts": {
+      "Staff-03": 200.34,
+      "Staff-04": 200.34,
+      "Staff-08": 200.33,
+      "Staff-12": 200.33,
+      "Staff-13": 200.33,
+      "Staff-18": 200.33,
+      "Staff-20": 57.24
+     },
+     "gratuity_payouts": {
+      "Staff-03": 18.04,
+      "Staff-04": 18.04,
+      "Staff-08": 18.04,
+      "Staff-12": 18.04,
+      "Staff-13": 18.04,
+      "Staff-18": 18.04,
+      "Staff-20": 5.16
+     },
+     "boh_payouts": {
+      "Staff-02": 20.69,
+      "Staff-07": 20.68,
+      "Staff-10": 20.68
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-27",
+    "inputs": {
+     "food_sales": 1476.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1438.69,
+     "cash_tips": 85.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 127.0,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0,
+      "Staff-17": 6.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 73.8,
+     "total_tips": 1523.69,
+     "foh_pool": 1449.89,
+     "auto_gratuity": 127.0,
+     "foh_payouts": {
+      "Staff-03": 236.03,
+      "Staff-08": 236.03,
+      "Staff-09": 236.03,
+      "Staff-12": 236.03,
+      "Staff-18": 236.03,
+      "Staff-20": 67.43,
+      "Staff-17": 202.31
+     },
+     "gratuity_payouts": {
+      "Staff-03": 20.68,
+      "Staff-08": 20.68,
+      "Staff-09": 20.67,
+      "Staff-12": 20.67,
+      "Staff-18": 20.67,
+      "Staff-20": 5.91,
+      "Staff-17": 17.72
+     },
+     "boh_payouts": {
+      "Staff-07": 24.6,
+      "Staff-10": 24.6,
+      "Staff-15": 24.6
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-28",
+    "inputs": {
+     "food_sales": 941.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 838.87,
+     "cash_tips": 21.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-13": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 47.05,
+     "total_tips": 859.87,
+     "foh_pool": 812.82,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 203.21,
+      "Staff-09": 203.21,
+      "Staff-12": 203.2,
+      "Staff-13": 203.2
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0,
+      "Staff-13": 0.0
+     },
+     "boh_payouts": {
+      "Staff-07": 23.53,
+      "Staff-15": 23.52
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-29",
+    "inputs": {
+     "food_sales": 715.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 818.07,
+     "cash_tips": 0.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-10",
+      "Staff-11"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 35.75,
+     "total_tips": 818.07,
+     "foh_pool": 782.32,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 195.58,
+      "Staff-09": 195.58,
+      "Staff-12": 195.58,
+      "Staff-16": 195.58
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0,
+      "Staff-16": 0.0
+     },
+     "boh_payouts": {
+      "Staff-10": 17.88,
+      "Staff-11": 17.87
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-30",
+    "inputs": {
+     "food_sales": 777.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 940.4,
+     "cash_tips": 16.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 70.4,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-11",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-04": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 38.85,
+     "total_tips": 956.4,
+     "foh_pool": 917.55,
+     "auto_gratuity": 70.4,
+     "foh_payouts": {
+      "Staff-01": 183.51,
+      "Staff-04": 183.51,
+      "Staff-09": 183.51,
+      "Staff-12": 183.51,
+      "Staff-18": 183.51
+     },
+     "gratuity_payouts": {
+      "Staff-01": 14.08,
+      "Staff-04": 14.08,
+      "Staff-09": 14.08,
+      "Staff-12": 14.08,
+      "Staff-18": 14.08
+     },
+     "boh_payouts": {
+      "Staff-07": 12.95,
+      "Staff-11": 12.95,
+      "Staff-15": 12.95
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   }
+  ]
+ },
+ {
+  "source_tab": "6.15.26",
+  "period_start": "2026-06-01",
+  "period_end": "2026-06-15",
+  "days": [
+   {
+    "date": "2026-06-01",
+    "inputs": {
+     "food_sales": 484.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 430.57,
+     "cash_tips": 0.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-10",
+      "Staff-11"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-08": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 24.2,
+     "total_tips": 430.57,
+     "foh_pool": 406.37,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-03": 101.6,
+      "Staff-04": 101.59,
+      "Staff-08": 101.59,
+      "Staff-16": 101.59
+     },
+     "gratuity_payouts": {
+      "Staff-03": 0.0,
+      "Staff-04": 0.0,
+      "Staff-08": 0.0,
+      "Staff-16": 0.0
+     },
+     "boh_payouts": {
+      "Staff-10": 12.1,
+      "Staff-11": 12.1
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-02",
+    "inputs": {
+     "food_sales": 934.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 933.91,
+     "cash_tips": 0.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-11",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 46.7,
+     "total_tips": 933.91,
+     "foh_pool": 887.21,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 177.45,
+      "Staff-05": 177.44,
+      "Staff-08": 177.44,
+      "Staff-09": 177.44,
+      "Staff-12": 177.44
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-05": 0.0,
+      "Staff-08": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 15.57,
+      "Staff-11": 15.57,
+      "Staff-15": 15.56
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-03",
+    "inputs": {
+     "food_sales": 479.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 533.41,
+     "cash_tips": 54.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 21.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-03": 7.0,
+      "Staff-09": 5.75,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 23.95,
+     "total_tips": 587.41,
+     "foh_pool": 563.46,
+     "auto_gratuity": 21.2,
+     "foh_payouts": {
+      "Staff-01": 116.87,
+      "Staff-03": 116.87,
+      "Staff-09": 96.0,
+      "Staff-14": 116.86,
+      "Staff-18": 116.86
+     },
+     "gratuity_payouts": {
+      "Staff-01": 4.4,
+      "Staff-03": 4.4,
+      "Staff-09": 3.61,
+      "Staff-14": 4.4,
+      "Staff-18": 4.39
+     },
+     "boh_payouts": {
+      "Staff-02": 7.99,
+      "Staff-07": 7.98,
+      "Staff-10": 7.98
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-04",
+    "inputs": {
+     "food_sales": 632.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 657.49,
+     "cash_tips": 87.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 37.4,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-03": 7.0,
+      "Staff-06": 7.0,
+      "Staff-14": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 31.6,
+     "total_tips": 744.49,
+     "foh_pool": 712.89,
+     "auto_gratuity": 37.4,
+     "foh_payouts": {
+      "Staff-01": 178.23,
+      "Staff-03": 178.22,
+      "Staff-06": 178.22,
+      "Staff-14": 178.22
+     },
+     "gratuity_payouts": {
+      "Staff-01": 9.35,
+      "Staff-03": 9.35,
+      "Staff-06": 9.35,
+      "Staff-14": 9.35
+     },
+     "boh_payouts": {
+      "Staff-02": 10.54,
+      "Staff-07": 10.53,
+      "Staff-10": 10.53
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-05",
+    "inputs": {
+     "food_sales": 2012.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1553.7,
+     "cash_tips": 23.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 185.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-06": 5.5,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 100.6,
+     "total_tips": 1576.7,
+     "foh_pool": 1476.1,
+     "auto_gratuity": 185.2,
+     "foh_payouts": {
+      "Staff-03": 291.07,
+      "Staff-06": 228.69,
+      "Staff-12": 291.06,
+      "Staff-16": 291.06,
+      "Staff-18": 291.06,
+      "Staff-20": 83.16
+     },
+     "gratuity_payouts": {
+      "Staff-03": 36.52,
+      "Staff-06": 28.69,
+      "Staff-12": 36.52,
+      "Staff-16": 36.52,
+      "Staff-18": 36.52,
+      "Staff-20": 10.43
+     },
+     "boh_payouts": {
+      "Staff-02": 33.54,
+      "Staff-07": 33.53,
+      "Staff-10": 33.53
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-06",
+    "inputs": {
+     "food_sales": 1350.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1381.79,
+     "cash_tips": 86.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 169.4,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-06": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 67.5,
+     "total_tips": 1467.79,
+     "foh_pool": 1400.29,
+     "auto_gratuity": 169.4,
+     "foh_payouts": {
+      "Staff-04": 222.78,
+      "Staff-06": 222.78,
+      "Staff-09": 222.77,
+      "Staff-12": 222.77,
+      "Staff-16": 222.77,
+      "Staff-18": 222.77,
+      "Staff-20": 63.65
+     },
+     "gratuity_payouts": {
+      "Staff-04": 26.95,
+      "Staff-06": 26.95,
+      "Staff-09": 26.95,
+      "Staff-12": 26.95,
+      "Staff-16": 26.95,
+      "Staff-18": 26.95,
+      "Staff-20": 7.7
+     },
+     "boh_payouts": {
+      "Staff-07": 22.5,
+      "Staff-10": 22.5,
+      "Staff-15": 22.5
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-07",
+    "inputs": {
+     "food_sales": 1230.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 979.43,
+     "cash_tips": 9.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-20": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 61.5,
+     "total_tips": 988.43,
+     "foh_pool": 926.93,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 185.39,
+      "Staff-09": 185.39,
+      "Staff-12": 185.39,
+      "Staff-16": 185.38,
+      "Staff-20": 185.38
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0,
+      "Staff-16": 0.0,
+      "Staff-20": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 30.75,
+      "Staff-15": 30.75
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-08",
+    "inputs": {
+     "food_sales": 617.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 591.13,
+     "cash_tips": 21.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-10",
+      "Staff-11"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-08": 7.0,
+      "Staff-14": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 30.85,
+     "total_tips": 612.13,
+     "foh_pool": 581.28,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-03": 116.26,
+      "Staff-04": 116.26,
+      "Staff-08": 116.26,
+      "Staff-14": 116.25,
+      "Staff-16": 116.25
+     },
+     "gratuity_payouts": {
+      "Staff-03": 0.0,
+      "Staff-04": 0.0,
+      "Staff-08": 0.0,
+      "Staff-14": 0.0,
+      "Staff-16": 0.0
+     },
+     "boh_payouts": {
+      "Staff-10": 15.43,
+      "Staff-11": 15.42
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-09",
+    "inputs": {
+     "food_sales": 718.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 864.72,
+     "cash_tips": 60.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-11",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-08": 7.0,
+      "Staff-12": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 35.9,
+     "total_tips": 924.72,
+     "foh_pool": 888.82,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-03": 177.77,
+      "Staff-04": 177.77,
+      "Staff-05": 177.76,
+      "Staff-08": 177.76,
+      "Staff-12": 177.76
+     },
+     "gratuity_payouts": {
+      "Staff-03": 0.0,
+      "Staff-04": 0.0,
+      "Staff-05": 0.0,
+      "Staff-08": 0.0,
+      "Staff-12": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 11.97,
+      "Staff-11": 11.97,
+      "Staff-15": 11.96
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-10",
+    "inputs": {
+     "food_sales": 819.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1081.56,
+     "cash_tips": 100.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 23.4,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-06": 7.0,
+      "Staff-09": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 40.95,
+     "total_tips": 1181.56,
+     "foh_pool": 1140.61,
+     "auto_gratuity": 23.4,
+     "foh_payouts": {
+      "Staff-03": 228.13,
+      "Staff-06": 228.12,
+      "Staff-09": 228.12,
+      "Staff-14": 228.12,
+      "Staff-18": 228.12
+     },
+     "gratuity_payouts": {
+      "Staff-03": 4.68,
+      "Staff-06": 4.68,
+      "Staff-09": 4.68,
+      "Staff-14": 4.68,
+      "Staff-18": 4.68
+     },
+     "boh_payouts": {
+      "Staff-02": 13.65,
+      "Staff-07": 13.65,
+      "Staff-10": 13.65
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-11",
+    "inputs": {
+     "food_sales": 816.0,
+     "event_food_sales": 400.0,
+     "credit_tips": 1189.75,
+     "cash_tips": 70.0,
+     "event_tips": 480.0,
+     "auto_gratuity": 158.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-06": 7.0,
+      "Staff-09": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 80.8,
+     "total_tips": 1739.75,
+     "foh_pool": 1658.95,
+     "auto_gratuity": 158.2,
+     "foh_payouts": {
+      "Staff-03": 331.79,
+      "Staff-06": 331.79,
+      "Staff-09": 331.79,
+      "Staff-14": 331.79,
+      "Staff-18": 331.79
+     },
+     "gratuity_payouts": {
+      "Staff-03": 31.64,
+      "Staff-06": 31.64,
+      "Staff-09": 31.64,
+      "Staff-14": 31.64,
+      "Staff-18": 31.64
+     },
+     "boh_payouts": {
+      "Staff-02": 26.94,
+      "Staff-07": 26.93,
+      "Staff-10": 26.93
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-12",
+    "inputs": {
+     "food_sales": 1399.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1330.6,
+     "cash_tips": 41.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 48.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-06": 7.0,
+      "Staff-08": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 69.95,
+     "total_tips": 1371.6,
+     "foh_pool": 1301.65,
+     "auto_gratuity": 48.2,
+     "foh_payouts": {
+      "Staff-03": 207.08,
+      "Staff-06": 207.08,
+      "Staff-08": 207.08,
+      "Staff-12": 207.08,
+      "Staff-16": 207.08,
+      "Staff-18": 207.08,
+      "Staff-20": 59.17
+     },
+     "gratuity_payouts": {
+      "Staff-03": 7.67,
+      "Staff-06": 7.67,
+      "Staff-08": 7.67,
+      "Staff-12": 7.67,
+      "Staff-16": 7.67,
+      "Staff-18": 7.66,
+      "Staff-20": 2.19
+     },
+     "boh_payouts": {
+      "Staff-02": 23.32,
+      "Staff-07": 23.32,
+      "Staff-10": 23.31
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-13",
+    "inputs": {
+     "food_sales": 420.0,
+     "event_food_sales": 1245.0,
+     "credit_tips": 503.48,
+     "cash_tips": 60.0,
+     "event_tips": 800.0,
+     "auto_gratuity": 294.97,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 3.88
+     }
+    },
+    "expected": {
+     "boh_allocation": 145.5,
+     "total_tips": 1363.48,
+     "foh_pool": 1217.98,
+     "auto_gratuity": 294.97,
+     "foh_payouts": {
+      "Staff-04": 185.83,
+      "Staff-08": 185.83,
+      "Staff-09": 185.83,
+      "Staff-12": 185.83,
+      "Staff-16": 185.83,
+      "Staff-18": 185.83,
+      "Staff-20": 103.0
+     },
+     "gratuity_payouts": {
+      "Staff-04": 45.01,
+      "Staff-08": 45.01,
+      "Staff-09": 45.0,
+      "Staff-12": 45.0,
+      "Staff-16": 45.0,
+      "Staff-18": 45.0,
+      "Staff-20": 24.95
+     },
+     "boh_payouts": {
+      "Staff-07": 48.5,
+      "Staff-10": 48.5,
+      "Staff-15": 48.5
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-14",
+    "inputs": {
+     "food_sales": 613.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 722.23,
+     "cash_tips": 40.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 95.4,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 30.65,
+     "total_tips": 762.23,
+     "foh_pool": 731.58,
+     "auto_gratuity": 95.4,
+     "foh_payouts": {
+      "Staff-04": 182.9,
+      "Staff-09": 182.9,
+      "Staff-12": 182.89,
+      "Staff-16": 182.89
+     },
+     "gratuity_payouts": {
+      "Staff-04": 23.85,
+      "Staff-09": 23.85,
+      "Staff-12": 23.85,
+      "Staff-16": 23.85
+     },
+     "boh_payouts": {
+      "Staff-02": 10.22,
+      "Staff-07": 10.22,
+      "Staff-15": 10.21
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-06-15",
+    "inputs": {
+     "food_sales": 686.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 812.18,
+     "cash_tips": 20.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 49.2,
+     "boh_worked": [
+      "Staff-10",
+      "Staff-11"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-08": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 34.3,
+     "total_tips": 832.18,
+     "foh_pool": 797.88,
+     "auto_gratuity": 49.2,
+     "foh_payouts": {
+      "Staff-03": 199.47,
+      "Staff-04": 199.47,
+      "Staff-08": 199.47,
+      "Staff-16": 199.47
+     },
+     "gratuity_payouts": {
+      "Staff-03": 12.3,
+      "Staff-04": 12.3,
+      "Staff-08": 12.3,
+      "Staff-16": 12.3
+     },
+     "boh_payouts": {
+      "Staff-10": 17.15,
+      "Staff-11": 17.15
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   }
+  ]
+ },
+ {
+  "source_tab": "5.31.26",
+  "period_start": "2026-05-16",
+  "period_end": "2026-05-31",
+  "days": [
+   {
+    "date": "2026-05-16",
+    "inputs": {
+     "food_sales": 1173.0,
+     "event_food_sales": 615.0,
+     "credit_tips": 976.1,
+     "cash_tips": 27.0,
+     "event_tips": 800.0,
+     "auto_gratuity": 82.72,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-06": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 120.15,
+     "total_tips": 1803.1,
+     "foh_pool": 1682.95,
+     "auto_gratuity": 82.72,
+     "foh_payouts": {
+      "Staff-04": 267.75,
+      "Staff-06": 267.74,
+      "Staff-09": 267.74,
+      "Staff-12": 267.74,
+      "Staff-16": 267.74,
+      "Staff-18": 267.74,
+      "Staff-20": 76.5
+     },
+     "gratuity_payouts": {
+      "Staff-04": 13.16,
+      "Staff-06": 13.16,
+      "Staff-09": 13.16,
+      "Staff-12": 13.16,
+      "Staff-16": 13.16,
+      "Staff-18": 13.16,
+      "Staff-20": 3.76
+     },
+     "boh_payouts": {
+      "Staff-07": 40.05,
+      "Staff-10": 40.05,
+      "Staff-15": 40.05
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-17",
+    "inputs": {
+     "food_sales": 841.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 779.23,
+     "cash_tips": 20.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 42.05,
+     "total_tips": 799.23,
+     "foh_pool": 757.18,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 151.44,
+      "Staff-05": 151.44,
+      "Staff-09": 151.44,
+      "Staff-12": 151.43,
+      "Staff-16": 151.43
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-05": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0,
+      "Staff-16": 0.0
+     },
+     "boh_payouts": {
+      "Staff-07": 21.03,
+      "Staff-10": 21.02
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-18",
+    "inputs": {
+     "food_sales": 1117.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 794.51,
+     "cash_tips": 7.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 73.8,
+     "boh_worked": [
+      "Staff-10",
+      "Staff-11"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-08": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 55.85,
+     "total_tips": 801.51,
+     "foh_pool": 745.66,
+     "auto_gratuity": 73.8,
+     "foh_payouts": {
+      "Staff-03": 149.14,
+      "Staff-04": 149.13,
+      "Staff-08": 149.13,
+      "Staff-12": 149.13,
+      "Staff-16": 149.13
+     },
+     "gratuity_payouts": {
+      "Staff-03": 14.76,
+      "Staff-04": 14.76,
+      "Staff-08": 14.76,
+      "Staff-12": 14.76,
+      "Staff-16": 14.76
+     },
+     "boh_payouts": {
+      "Staff-10": 27.93,
+      "Staff-11": 27.92
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-19",
+    "inputs": {
+     "food_sales": 984.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1014.34,
+     "cash_tips": 40.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-11",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-08": 1.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 49.2,
+     "total_tips": 1054.34,
+     "foh_pool": 1005.14,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 242.62,
+      "Staff-05": 242.62,
+      "Staff-08": 34.66,
+      "Staff-09": 242.62,
+      "Staff-12": 242.62
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-05": 0.0,
+      "Staff-08": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 16.4,
+      "Staff-11": 16.4,
+      "Staff-15": 16.4
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-20",
+    "inputs": {
+     "food_sales": 867.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 844.92,
+     "cash_tips": 36.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-03": 7.0,
+      "Staff-09": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 43.35,
+     "total_tips": 880.92,
+     "foh_pool": 837.57,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-01": 167.52,
+      "Staff-03": 167.52,
+      "Staff-09": 167.51,
+      "Staff-14": 167.51,
+      "Staff-18": 167.51
+     },
+     "gratuity_payouts": {
+      "Staff-01": 0.0,
+      "Staff-03": 0.0,
+      "Staff-09": 0.0,
+      "Staff-14": 0.0,
+      "Staff-18": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 14.45,
+      "Staff-07": 14.45,
+      "Staff-10": 14.45
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-21",
+    "inputs": {
+     "food_sales": 1163.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1002.35,
+     "cash_tips": 44.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 82.21,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-03": 7.0,
+      "Staff-06": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 58.15,
+     "total_tips": 1046.35,
+     "foh_pool": 988.2,
+     "auto_gratuity": 82.21,
+     "foh_payouts": {
+      "Staff-01": 197.64,
+      "Staff-03": 197.64,
+      "Staff-06": 197.64,
+      "Staff-14": 197.64,
+      "Staff-18": 197.64
+     },
+     "gratuity_payouts": {
+      "Staff-01": 16.45,
+      "Staff-03": 16.44,
+      "Staff-06": 16.44,
+      "Staff-14": 16.44,
+      "Staff-18": 16.44
+     },
+     "boh_payouts": {
+      "Staff-02": 19.39,
+      "Staff-07": 19.38,
+      "Staff-10": 19.38
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-22",
+    "inputs": {
+     "food_sales": 1413.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1566.19,
+     "cash_tips": 130.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 38.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-06": 7.0,
+      "Staff-08": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 70.65,
+     "total_tips": 1696.19,
+     "foh_pool": 1625.54,
+     "auto_gratuity": 38.2,
+     "foh_payouts": {
+      "Staff-03": 258.61,
+      "Staff-06": 258.61,
+      "Staff-08": 258.61,
+      "Staff-12": 258.61,
+      "Staff-16": 258.61,
+      "Staff-18": 258.61,
+      "Staff-20": 73.88
+     },
+     "gratuity_payouts": {
+      "Staff-03": 6.08,
+      "Staff-06": 6.08,
+      "Staff-08": 6.08,
+      "Staff-12": 6.08,
+      "Staff-16": 6.08,
+      "Staff-18": 6.07,
+      "Staff-20": 1.73
+     },
+     "boh_payouts": {
+      "Staff-02": 23.55,
+      "Staff-07": 23.55,
+      "Staff-10": 23.55
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-23",
+    "inputs": {
+     "food_sales": 1783.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1639.96,
+     "cash_tips": 65.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 169.2,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-06": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-20": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 89.15,
+     "total_tips": 1704.96,
+     "foh_pool": 1615.81,
+     "auto_gratuity": 169.2,
+     "foh_payouts": {
+      "Staff-04": 221.78,
+      "Staff-06": 221.78,
+      "Staff-08": 221.78,
+      "Staff-09": 221.78,
+      "Staff-12": 221.78,
+      "Staff-16": 221.78,
+      "Staff-18": 221.77,
+      "Staff-20": 63.36
+     },
+     "gratuity_payouts": {
+      "Staff-04": 23.23,
+      "Staff-06": 23.23,
+      "Staff-08": 23.22,
+      "Staff-09": 23.22,
+      "Staff-12": 23.22,
+      "Staff-16": 23.22,
+      "Staff-18": 23.22,
+      "Staff-20": 6.64
+     },
+     "boh_payouts": {
+      "Staff-07": 29.72,
+      "Staff-10": 29.72,
+      "Staff-15": 29.71
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-24",
+    "inputs": {
+     "food_sales": 1148.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 999.34,
+     "cash_tips": 66.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 64.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 57.4,
+     "total_tips": 1065.34,
+     "foh_pool": 1007.94,
+     "auto_gratuity": 64.2,
+     "foh_payouts": {
+      "Staff-04": 251.99,
+      "Staff-09": 251.99,
+      "Staff-12": 251.98,
+      "Staff-16": 251.98
+     },
+     "gratuity_payouts": {
+      "Staff-04": 16.05,
+      "Staff-09": 16.05,
+      "Staff-12": 16.05,
+      "Staff-16": 16.05
+     },
+     "boh_payouts": {
+      "Staff-02": 19.14,
+      "Staff-10": 19.13,
+      "Staff-15": 19.13
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-25",
+    "inputs": {
+     "food_sales": 788.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 668.49,
+     "cash_tips": 71.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-10",
+      "Staff-11"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-04": 7.0,
+      "Staff-08": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 39.4,
+     "total_tips": 739.49,
+     "foh_pool": 700.09,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-03": 175.03,
+      "Staff-04": 175.02,
+      "Staff-08": 175.02,
+      "Staff-16": 175.02
+     },
+     "gratuity_payouts": {
+      "Staff-03": 0.0,
+      "Staff-04": 0.0,
+      "Staff-08": 0.0,
+      "Staff-16": 0.0
+     },
+     "boh_payouts": {
+      "Staff-10": 19.7,
+      "Staff-11": 19.7
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-26",
+    "inputs": {
+     "food_sales": 1212.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 747.51,
+     "cash_tips": 44.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-11",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 60.6,
+     "total_tips": 791.51,
+     "foh_pool": 730.91,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 146.19,
+      "Staff-05": 146.18,
+      "Staff-08": 146.18,
+      "Staff-09": 146.18,
+      "Staff-12": 146.18
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-05": 0.0,
+      "Staff-08": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 20.2,
+      "Staff-11": 20.2,
+      "Staff-15": 20.2
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-27",
+    "inputs": {
+     "food_sales": 913.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 724.92,
+     "cash_tips": 40.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-03": 7.0,
+      "Staff-09": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 45.65,
+     "total_tips": 764.92,
+     "foh_pool": 719.27,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-01": 143.86,
+      "Staff-03": 143.86,
+      "Staff-09": 143.85,
+      "Staff-14": 143.85,
+      "Staff-18": 143.85
+     },
+     "gratuity_payouts": {
+      "Staff-01": 0.0,
+      "Staff-03": 0.0,
+      "Staff-09": 0.0,
+      "Staff-14": 0.0,
+      "Staff-18": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 15.22,
+      "Staff-07": 15.22,
+      "Staff-10": 15.21
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-28",
+    "inputs": {
+     "food_sales": 566.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 699.57,
+     "cash_tips": 105.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 27.2,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-01": 7.0,
+      "Staff-03": 7.0,
+      "Staff-08": 7.0,
+      "Staff-14": 7.0,
+      "Staff-18": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 28.3,
+     "total_tips": 804.57,
+     "foh_pool": 776.27,
+     "auto_gratuity": 27.2,
+     "foh_payouts": {
+      "Staff-01": 155.26,
+      "Staff-03": 155.26,
+      "Staff-08": 155.25,
+      "Staff-14": 155.25,
+      "Staff-18": 155.25
+     },
+     "gratuity_payouts": {
+      "Staff-01": 5.44,
+      "Staff-03": 5.44,
+      "Staff-08": 5.44,
+      "Staff-14": 5.44,
+      "Staff-18": 5.44
+     },
+     "boh_payouts": {
+      "Staff-02": 9.44,
+      "Staff-07": 9.43,
+      "Staff-10": 9.43
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-29",
+    "inputs": {
+     "food_sales": 1753.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1832.87,
+     "cash_tips": 37.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-02",
+      "Staff-07",
+      "Staff-10"
+     ],
+     "foh_hours": {
+      "Staff-03": 7.0,
+      "Staff-08": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-17": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 87.65,
+     "total_tips": 1869.87,
+     "foh_pool": 1782.22,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-03": 283.54,
+      "Staff-08": 283.54,
+      "Staff-09": 283.54,
+      "Staff-12": 283.53,
+      "Staff-16": 283.53,
+      "Staff-18": 283.53,
+      "Staff-17": 81.01
+     },
+     "gratuity_payouts": {
+      "Staff-03": 0.0,
+      "Staff-08": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0,
+      "Staff-16": 0.0,
+      "Staff-18": 0.0,
+      "Staff-17": 0.0
+     },
+     "boh_payouts": {
+      "Staff-02": 29.22,
+      "Staff-07": 29.22,
+      "Staff-10": 29.21
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-30",
+    "inputs": {
+     "food_sales": 1159.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 1424.63,
+     "cash_tips": 10.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 109.8,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-10",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-13": 7.0,
+      "Staff-16": 7.0,
+      "Staff-18": 7.0,
+      "Staff-17": 2.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 57.95,
+     "total_tips": 1434.63,
+     "foh_pool": 1376.68,
+     "auto_gratuity": 109.8,
+     "foh_payouts": {
+      "Staff-04": 219.02,
+      "Staff-09": 219.02,
+      "Staff-12": 219.02,
+      "Staff-13": 219.02,
+      "Staff-16": 219.02,
+      "Staff-18": 219.01,
+      "Staff-17": 62.57
+     },
+     "gratuity_payouts": {
+      "Staff-04": 17.47,
+      "Staff-09": 17.47,
+      "Staff-12": 17.47,
+      "Staff-13": 17.47,
+      "Staff-16": 17.47,
+      "Staff-18": 17.46,
+      "Staff-17": 4.99
+     },
+     "boh_payouts": {
+      "Staff-07": 19.32,
+      "Staff-10": 19.32,
+      "Staff-15": 19.31
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   },
+   {
+    "date": "2026-05-31",
+    "inputs": {
+     "food_sales": 748.0,
+     "event_food_sales": 0.0,
+     "credit_tips": 839.05,
+     "cash_tips": 40.0,
+     "event_tips": 0.0,
+     "auto_gratuity": 0.0,
+     "boh_worked": [
+      "Staff-07",
+      "Staff-15"
+     ],
+     "foh_hours": {
+      "Staff-04": 7.0,
+      "Staff-05": 7.0,
+      "Staff-09": 7.0,
+      "Staff-12": 7.0,
+      "Staff-16": 7.0
+     }
+    },
+    "expected": {
+     "boh_allocation": 37.4,
+     "total_tips": 879.05,
+     "foh_pool": 841.65,
+     "auto_gratuity": 0.0,
+     "foh_payouts": {
+      "Staff-04": 168.33,
+      "Staff-05": 168.33,
+      "Staff-09": 168.33,
+      "Staff-12": 168.33,
+      "Staff-16": 168.33
+     },
+     "gratuity_payouts": {
+      "Staff-04": 0.0,
+      "Staff-05": 0.0,
+      "Staff-09": 0.0,
+      "Staff-12": 0.0,
+      "Staff-16": 0.0
+     },
+     "boh_payouts": {
+      "Staff-07": 18.7,
+      "Staff-15": 18.7
+     }
+    },
+    "flags": {
+     "negative_foh_pool": false
+    },
+    "spreadsheet_deviations": []
+   }
+  ]
+ }
+]

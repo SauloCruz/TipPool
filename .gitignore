@@ -1,0 +1,42 @@
+# Local secrets and environment
+.env
+.env.*
+!.env.example
+
+# Live/local data. Do not publish venue data or backups.
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+# Python/runtime caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local editor/AI/tool state
+.DS_Store
+.claude/
+.codex/
+.agents/
+
+# Logs and generated output
+*.log
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# Local archives and one-off handoff bundles
+*.zip
+*.tar
+*.tar.gz
+
+# original (pre-pseudonymization) fixture data — never publish
+*.local.json
+
+# one-off design handoff bundle (contains staff first names in mockups)
+design_handoff_daily_review/

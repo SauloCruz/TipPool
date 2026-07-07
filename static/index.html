@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>Tavern Law — Tip Pool</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header id="topbar" hidden>
+  <button id="venuechip" class="ghost" type="button" title="Switch venue"></button>
+  <nav>
+    <a href="#/day" data-nav="day">Daily</a>
+    <a href="#/period" data-nav="period">Period</a>
+    <a href="#/export" data-nav="export">Export</a>
+    <a href="#/employees" data-nav="employees" data-admin>Staff</a>
+    <a href="#/settings" data-nav="settings" data-admin>Setup</a>
+    <a href="#/users" data-nav="users" data-super>Users</a>
+    <a href="#/audit" data-nav="audit" data-admin>Audit</a>
+  </nav>
+  <button id="logout" class="ghost" type="button">Sign out</button>
+</header>
+<main id="view"></main>
+<div id="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
