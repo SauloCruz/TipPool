@@ -4,7 +4,13 @@ from fractions import Fraction
 
 import pytest
 
-from engine import ManagerInPoolError, compute_day, distribute_cents, to_cents
+from engine import (
+    DEFAULT_DOOR_WEIGHT,
+    ManagerInPoolError,
+    compute_day,
+    distribute_cents,
+    to_cents,
+)
 
 
 def test_to_cents_float_precision():
@@ -180,3 +186,53 @@ class TestRoleWeightHook:
         out = compute_day(credit_tips=90, foh_hours={"P": 3, "Q": 3},
                           foh_role_weights={"P": 2})  # Q defaults to 1
         assert out.foh_payouts == {"P": 60.00, "Q": 30.00}
+
+
+class TestDoorHalfWeight:
+    """Owner ruling 2026-07-29: a host/door shift earns half an hour of tip
+    credit per hour worked, applied to tips AND auto-gratuity."""
+
+    def test_door_shift_earns_half_credit(self):
+        # Ann 7h regular + Bo 4h door -> 7 + 2 = 9 weighted hours, $10/hr
+        out = compute_day(credit_tips=90, auto_gratuity=45,
+                          foh_hours={"Ann": 7, "Bo": 4},
+                          foh_role_weights={"Bo": DEFAULT_DOOR_WEIGHT})
+        assert out.foh_payouts == {"Ann": 70.00, "Bo": 20.00}
+        assert out.gratuity_payouts == {"Ann": 35.00, "Bo": 10.00}
+
+    def test_weighted_hours_reported(self):
+        out = compute_day(credit_tips=90, foh_hours={"Ann": 7, "Bo": 4},
+                          foh_role_weights={"Bo": DEFAULT_DOOR_WEIGHT})
+        assert out.weighted_hours == {"Ann": 7.0, "Bo": 2.0}
+        assert out.total_weighted_hours == 9.0
+
+    def test_rate_is_per_weighted_hour(self):
+        """tips_per_hour must reproduce every payout as rate * weighted hours —
+        dividing the pool by raw hours would report a rate nobody is paid."""
+        out = compute_day(credit_tips=90, foh_hours={"Ann": 7, "Bo": 4},
+                          foh_role_weights={"Bo": DEFAULT_DOOR_WEIGHT})
+        assert out.tips_per_hour == 10.00
+        for name, payout in out.foh_payouts.items():
+            assert round(out.tips_per_hour * out.weighted_hours[name], 2) == payout
+
+    def test_conservation_holds_with_awkward_remainder(self):
+        # 100.01 over 3 door + 2 regular people: residual cents must still land
+        out = compute_day(credit_tips=100.01, auto_gratuity=33.33,
+                          foh_hours={"A": 5, "B": 5, "C": 3, "D": 3, "E": 4},
+                          foh_role_weights={n: DEFAULT_DOOR_WEIGHT for n in "CDE"})
+        assert sum(out.foh_payout_cents.values()) == out.foh_pool_cents
+        assert sum(out.gratuity_payout_cents.values()) == out.auto_gratuity_cents
+
+    def test_all_door_still_splits_whole_pool(self):
+        """Weights scale the split, they don't shrink the pool: if everyone is
+        on the door the full pool is still distributed."""
+        out = compute_day(credit_tips=90, foh_hours={"A": 3, "B": 6},
+                          foh_role_weights={"A": DEFAULT_DOOR_WEIGHT,
+                                            "B": DEFAULT_DOOR_WEIGHT})
+        assert sum(out.foh_payout_cents.values()) == 9000
+        assert out.foh_payouts == {"A": 30.00, "B": 60.00}
+
+    def test_zero_hours_door_mark_is_harmless(self):
+        out = compute_day(credit_tips=90, foh_hours={"A": 9, "B": 0},
+                          foh_role_weights={"B": DEFAULT_DOOR_WEIGHT})
+        assert out.foh_payouts == {"A": 90.00, "B": 0.0}

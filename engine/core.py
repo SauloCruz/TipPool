@@ -16,6 +16,11 @@ from typing import Iterable, Mapping
 DEFAULT_BOH_FOOD_PCT = Decimal("0.05")
 DEFAULT_BOH_EVENT_FOOD_PCT = Decimal("0.10")
 
+# Owner ruling 2026-07-29: a Tavern Law host/door shift earns half an hour of
+# tip credit per hour worked. Applied via `foh_role_weights` to BOTH the tip
+# pool and the auto-gratuity pool (same weight map, owner-confirmed).
+DEFAULT_DOOR_WEIGHT = Fraction(1, 2)
+
 
 class ManagerInPoolError(ValueError):
     """A pool-excluded person (manager/owner) appeared in a pool roster.
@@ -80,6 +85,8 @@ class DayResult:
     boh_allocation: float
     foh_pool: float
     auto_gratuity: float
+    # Rate per WEIGHTED hour: payout == tips_per_hour * weighted_hours[name]
+    # for everyone. With no role weights this equals pool / raw hours.
     tips_per_hour: float
     foh_payouts: dict[str, float]
     gratuity_payouts: dict[str, float]
@@ -94,6 +101,10 @@ class DayResult:
     gratuity_payout_cents: dict[str, int]
     boh_payout_cents: dict[str, int]
     foh_shortfall_cents: int
+    # Effective (role-weighted) hours each payout was computed from. Equal to
+    # raw hours when no role weight applies; halved for a door shift.
+    weighted_hours: dict[str, float] = field(default_factory=dict)
+    total_weighted_hours: float = 0.0
 
 
 def compute_day(
@@ -115,8 +126,12 @@ def compute_day(
 
     `foh_hours` must already be tippable-clipped (see clipping.clip_timecard).
     `excluded` is the manager/owner hard-block list: any overlap with either
-    roster raises ManagerInPoolError. `foh_role_weights` is the v1 no-op hook
-    for future role weighting (defaults to weight 1 for everyone).
+    roster raises ManagerInPoolError.
+
+    `foh_role_weights` maps name -> per-hour weight (default 1). Weighted hours
+    (hours * weight) drive BOTH the tip pool and the auto-gratuity pool, so a
+    door shift at DEFAULT_DOOR_WEIGHT earns half credit in each. Conservation
+    still holds exactly: the pools are distributed by weight, never truncated.
     """
     foh_hours = dict(foh_hours or {})
     boh_roster = list(boh_worked)
@@ -203,8 +218,11 @@ def compute_day(
     if boh_roster:
         assert sum(boh_payout_cents.values()) == boh_alloc_cents
 
+    # Divide by WEIGHTED hours, not raw hours: with a role weight in play the
+    # raw-hours rate is one nobody is actually paid, so payout / hours would
+    # not reproduce it. Identical to the raw rate when all weights are 1.
     tips_per_hour = (
-        float(Fraction(foh_pool_cents, 100) / total_hours) if total_hours > 0 else 0.0
+        float(Fraction(foh_pool_cents, 100) / total_weight) if total_weight > 0 else 0.0
     )
 
     return DayResult(
@@ -226,4 +244,6 @@ def compute_day(
         gratuity_payout_cents=gratuity_payout_cents,
         boh_payout_cents=boh_payout_cents,
         foh_shortfall_cents=foh_shortfall_cents,
+        weighted_hours={n: float(w) for n, w in weights.items()},
+        total_weighted_hours=float(total_weight),
     )

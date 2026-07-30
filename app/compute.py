@@ -9,10 +9,15 @@ absent means POOL_HOURS (pre-M5 snapshots)."""
 from __future__ import annotations
 
 from decimal import Decimal
+from fractions import Fraction
 
 import engine
 from engine import ManagerInPoolError, compute_day, compute_day_percent_tipout
-from engine.core import DEFAULT_BOH_EVENT_FOOD_PCT, DEFAULT_BOH_FOOD_PCT
+from engine.core import (
+    DEFAULT_BOH_EVENT_FOOD_PCT,
+    DEFAULT_BOH_FOOD_PCT,
+    DEFAULT_DOOR_WEIGHT,
+)
 
 
 class DayValidationError(ValueError):
@@ -28,6 +33,9 @@ EMPTY_INPUTS = {
     "auto_gratuity_cents": 0,
     "boh_worked": [],
     "foh_hours": {},
+    # employee_ids working the host/door that day -> half tip credit per hour
+    # (tl_door_weight). Absent in pre-2026-07-29 snapshots; treated as empty.
+    "door_worked": [],
 }
 
 EMPTY_INPUTS_LF = {
@@ -50,12 +58,18 @@ def _dollars(cents: int) -> Decimal:
     return Decimal(cents) / 100
 
 
-def compute_outputs(inputs: dict, employees: dict[int, dict]) -> dict:
+def compute_outputs(inputs: dict, employees: dict[int, dict],
+                    door_weight=DEFAULT_DOOR_WEIGHT) -> dict:
     """employees: id -> {display_name, pool_role}. Raises DayValidationError
     on unknown/wrong-pool employees; the EXCLUDED hard-block lives in the
-    engine itself and is re-raised with a clear message."""
+    engine itself and is re-raised with a clear message.
+
+    `door_weight` is the per-hour tip credit for staff marked on the day's
+    `door_worked` list (venue setting tl_door_weight, default 1/2)."""
     boh_ids = [int(e) for e in inputs["boh_worked"]]
     foh_hours = {int(k): v for k, v in inputs["foh_hours"].items()}
+    # door_worked is absent from snapshots predating the 2026-07-29 ruling
+    door_ids = {int(e) for e in inputs.get("door_worked") or ()}
 
     problems = []
     for eid in boh_ids:
@@ -70,10 +84,17 @@ def compute_outputs(inputs: dict, employees: dict[int, dict]) -> dict:
             problems.append(f"unknown employee id {eid} in FOH hours")
         elif emp["pool_role"] == "BOH":
             problems.append(f"{emp['display_name']} is BOH, not FOH")
+    for eid in sorted(door_ids):
+        emp = employees.get(eid)
+        if emp is None:
+            problems.append(f"unknown employee id {eid} marked on the door")
+        elif emp["pool_role"] == "BOH":
+            problems.append(f"{emp['display_name']} is BOH and cannot work the door")
     if problems:
         raise DayValidationError("; ".join(problems))
 
     excluded = {str(eid) for eid, e in employees.items() if e["pool_role"] == "EXCLUDED"}
+    door_w = Fraction(str(door_weight))
     try:
         result = compute_day(
             food_sales=_dollars(inputs["food_sales_cents"]),
@@ -85,6 +106,7 @@ def compute_outputs(inputs: dict, employees: dict[int, dict]) -> dict:
             boh_worked=[str(e) for e in boh_ids],
             foh_hours={str(k): v for k, v in foh_hours.items()},
             excluded=excluded,
+            foh_role_weights={str(e): door_w for e in door_ids},
         )
     except ManagerInPoolError as exc:
         ids = [i for i in excluded if i in str(exc)]
@@ -102,13 +124,20 @@ def compute_outputs(inputs: dict, employees: dict[int, dict]) -> dict:
         "engine_version": engine.__version__,
         "boh_food_pct": str(DEFAULT_BOH_FOOD_PCT),
         "boh_event_food_pct": str(DEFAULT_BOH_EVENT_FOOD_PCT),
+        # the door weight this day was computed with, so a re-read of the
+        # snapshot explains its own numbers even if the setting changes later
+        # ("1/2" exact for audit; the float is for display arithmetic)
+        "door_weight": str(door_w),
+        "door_weight_num": float(door_w),
         "totals": {
             "total_tips_cents": result.total_tips_cents,
             "boh_allocation_cents": result.boh_allocation_cents,
             "foh_pool_cents": result.foh_pool_cents,
             "auto_gratuity_cents": result.auto_gratuity_cents,
             "foh_shortfall_cents": result.foh_shortfall_cents,
+            # rate per WEIGHTED hour (payout == rate * weighted_hours)
             "tips_per_hour": result.tips_per_hour,
+            "total_weighted_hours": result.total_weighted_hours,
         },
         "flags": result.flags,
         "foh": sorted(
@@ -117,6 +146,8 @@ def compute_outputs(inputs: dict, employees: dict[int, dict]) -> dict:
                     "employee_id": int(eid),
                     "name": name(eid),
                     "hours": foh_hours[int(eid)],
+                    "door": int(eid) in door_ids,
+                    "weighted_hours": result.weighted_hours.get(eid, 0.0),
                     "tips_cents": result.foh_payout_cents[eid],
                     "gratuity_cents": result.gratuity_payout_cents[eid],
                 }

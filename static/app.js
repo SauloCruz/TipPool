@@ -268,9 +268,9 @@ async function renderDay(dateArg) {
   const blockedFields = sq?.blocked_fields || [];
 
   /* ---- shared save/compute plumbing (same PUT payload as legacy) ---- */
-  const moneyEls = {}, hourEls = {}, bohChecks = {};
+  const moneyEls = {}, hourEls = {}, bohChecks = {}, doorChecks = {};
   function collectInputs() {
-    const out = { boh_worked: [], foh_hours: {} };
+    const out = { boh_worked: [], foh_hours: {}, door_worked: [] };
     for (const key of [...STEPPER_MONEY.map(([k]) => k),
                        "event_food_sales_cents", "event_tips_cents"]) {
       out[key] = centsFromInput(moneyEls[key]);
@@ -279,6 +279,8 @@ async function renderDay(dateArg) {
     foh.forEach((e) => {
       const h = parseFloat(hourEls[e.id].value);
       if (h > 0) out.foh_hours[e.id] = h;
+      // only meaningful alongside hours — a door mark with 0h weighs nothing
+      if (h > 0 && doorChecks[e.id]?.checked) out.door_worked.push(e.id);
     });
     return out;
   }
@@ -450,11 +452,29 @@ async function renderDay(dateArg) {
       editWrap.append(el("div", { class: "field" }, editInput,
         el("span", { class: "unit" }, "h")), doneBtn);
 
+      // Door/host shift: per-day, not a fixed role (staff work dual roles).
+      // Halves this person's tip + gratuity credit for the night.
+      const doorState = { checked: (inputs.door_worked || []).includes(e.id) };
+      doorChecks[e.id] = doorState;
+      const doorBtn = el("button", {
+        class: `doorbtn ${doorState.checked ? "on" : ""}`, type: "button",
+        title: "Worked the host/door station — half tip credit per hour",
+        ...(finalized ? { disabled: "" } : {}),
+      }, "Door");
+
       const row = el("div", { class: `hrow ${missing ? "warnrow" : ""}` },
         el("div", { class: "who" },
           el("div", { class: "row", style: "gap:8px" },
             el("span", { class: "nm" }, e.display_name), rowBadge), sub),
-        el("div", { style: "flex:none" }, valueBtn, editWrap));
+        el("div", { class: "row", style: "flex:none; gap:8px" },
+          doorBtn, el("div", { style: "flex:none" }, valueBtn, editWrap)));
+
+      doorBtn.addEventListener("click", () => {
+        if (finalized) return;
+        doorState.checked = !doorState.checked;
+        doorBtn.classList.toggle("on", doorState.checked);
+        scheduleSave(); refreshAll();
+      });
       const skipBtn = missing
         ? el("button", { class: "skipbtn", type: "button" }, "Record 0h — worked but never clocked out")
         : null;
@@ -482,7 +502,8 @@ async function renderDay(dateArg) {
         scheduleSave(); refreshAll();
       });
 
-      hourRows[e.id] = { emp: e, hidden, valueBtn, sub, rowBadge, row, missing, skipBtn };
+      hourRows[e.id] = { emp: e, hidden, valueBtn, sub, rowBadge, row, missing, skipBtn,
+                         doorState };
       hoursCard.append(row);
       if (skipBtn) hoursCard.append(skipBtn);
     }
@@ -558,8 +579,16 @@ async function renderDay(dateArg) {
       el("span", { class: "cname" }, "Name"), el("span", { class: "chrs" }, "Hrs"),
       el("span", { class: "ctips" }, "Tips"), el("span", { class: "cgrat" }, "Grat")));
     for (const r of computed.foh) {
+      // door shifts: show credited hours, with the hours actually worked
+      // alongside, so a halved payout never looks like a mistake
+      const hrs = r.door
+        ? el("span", { class: "chrs" },
+            el("span", { class: "doormark", title: "Door shift — half credit" }, "D"),
+            ` ${parseFloat(Number(r.weighted_hours).toFixed(2))}`,
+            el("span", { class: "rawhrs" }, `/${parseFloat(Number(r.hours).toFixed(2))}`))
+        : el("span", { class: "chrs" }, String(r.hours));
       fohT.append(el("div", { class: "prow" },
-        el("span", { class: "cname" }, esc(r.name)), el("span", { class: "chrs" }, String(r.hours)),
+        el("span", { class: "cname" }, esc(r.name)), hrs,
         el("span", { class: "ctips" }, fmt(r.tips_cents)), el("span", { class: "cgrat" }, fmt(r.gratuity_cents))));
     }
     const bohT = p.querySelector(".boh-slot");
@@ -613,6 +642,14 @@ async function renderDay(dateArg) {
                                     sqVal.boh_worked.slice().sort((a, b) => a - b))) {
       items.push({ icon: "✎", warn: false, t: "Kitchen roster edited",
                    d: `${c.boh_worked.length} marked as worked` });
+    }
+    if (c.door_worked?.length) {
+      const dw = computed?.door_weight_num ?? 0.5;
+      const names = c.door_worked
+        .map((id) => hourRows[id]?.emp.display_name).filter(Boolean).join(", ");
+      items.push({ icon: "◐", warn: false,
+                   t: `Door shift — ${c.door_worked.length} at half credit`,
+                   d: `${names} · ${dw}× tip and gratuity credit per hour` });
     }
     if (c.event_food_sales_cents || c.event_tips_cents) {
       items.push({ icon: "＋", warn: false, t: "Event entries",
@@ -781,7 +818,8 @@ async function renderDay(dateArg) {
       card._badge.textContent = key in sqVal || prov !== "manual" ? text : "manual";
       card._revert.hidden = prov !== "override" || finalized;
     }
-    for (const { emp, hidden, valueBtn, sub, rowBadge, missing } of Object.values(hourRows)) {
+    for (const { emp, hidden, valueBtn, sub, rowBadge, missing, doorState }
+         of Object.values(hourRows)) {
       const cur = parseFloat(hidden.value) || 0;
       valueBtn.textContent = "";
       // 2-decimal display, trailing zeros trimmed (6.85, 5.5, 7)
@@ -792,6 +830,11 @@ async function renderDay(dateArg) {
       rowBadge.hidden = !overridden;
       if (missing && !clockResolved.has(emp.id)) {
         sub.textContent = "Missing clock-out — enter hours or record 0h";
+      } else if (doorState?.checked && cur > 0) {
+        // spell out the credited hours so the payout is checkable by hand
+        const dw = computed?.door_weight_num ?? 0.5;
+        const credited = parseFloat((cur * dw).toFixed(2));
+        sub.textContent = `Door shift — ${credited}h credited of ${parseFloat(cur.toFixed(2))}h worked`;
       } else if (overridden) {
         sub.textContent = "manual override · audit-logged";
       } else {
@@ -2047,6 +2090,27 @@ async function renderSettings() {
         el("span", { class: "hint", style: "flex:1" },
           "Flag a no-host day only when fewer than this many bussers worked (the 10%-to-bussers re-split always applies; 0 = never flag):"),
         thrInput)));
+  } else {
+    /* --- POOL_HOURS: host/door tip credit per hour --- */
+    const doorInput = el("input", { type: "text", inputmode: "decimal",
+      value: s.tl_door_weight ?? "0.5", style: "width:80px;text-align:right" });
+    doorInput.addEventListener("blur", async () => {
+      const v = doorInput.value.trim();
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n < 0 || n > 1) {
+        toast("enter a number between 0 and 1", true); return;
+      }
+      try {
+        await api("/api/settings", { method: "PUT", body: { tl_door_weight: v } });
+        toast("Door tip credit saved");
+      } catch (e) { toast(e.message, true); }
+    });
+    view.append(el("div", { class: "card" },
+      el("h2", {}, "Host / door tip credit"),
+      el("div", { class: "row" },
+        el("span", { class: "hint", style: "flex:1" },
+          "Tip credit per hour for a host/door shift, marked per person per day on the Daily screen. 0.5 = half credit; 1 = no reduction. Applies to tips and auto-gratuity. Finalized days keep the rate they were locked with."),
+        doorInput)));
   }
 
   /* --- gratuity service charge --- */

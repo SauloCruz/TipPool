@@ -248,3 +248,101 @@ class TestPeriodsAndExport:
         assert period_for(date(2026, 2, 16)) == (date(2026, 2, 16), date(2026, 2, 28))
         assert period_for(date(2028, 2, 20)) == (date(2028, 2, 16), date(2028, 2, 29))
         assert period_for(date(2026, 12, 31)) == (date(2026, 12, 16), date(2026, 12, 31))
+
+
+class TestDoorHalfWeight:
+    """Owner ruling 2026-07-29: staff marked on the host/door for a given day
+    earn half tip credit per hour (tl_door_weight), for tips AND gratuity.
+    Per-day rather than a fixed role because staff work dual roles."""
+
+    DOOR_DAY = "2026-06-24"
+
+    def _put(self, admin, roster, **over):
+        body = {
+            "food_sales_cents": 0, "credit_tips_cents": 9000,
+            "cash_tips_cents": 0, "auto_gratuity_cents": 4500,
+            "boh_worked": [],
+            "foh_hours": {str(roster["Bree"]): 7.0, str(roster["Kelly"]): 4.0},
+        }
+        body.update(over)
+        return admin.put(f"/api/days/{self.DOOR_DAY}", json=body)
+
+    def test_door_mark_halves_tips_and_gratuity(self, admin, roster):
+        # Bree 7h regular, Kelly 4h door -> 9 weighted hours at $10/hr
+        r = self._put(admin, roster, door_worked=[roster["Kelly"]])
+        assert r.status_code == 200, r.text
+        rows = {p["name"]: p for p in r.json()["computed"]["foh"]}
+        assert rows["Bree"]["tips_cents"] == 7000
+        assert rows["Kelly"]["tips_cents"] == 2000      # not 4000
+        assert rows["Bree"]["gratuity_cents"] == 3500
+        assert rows["Kelly"]["gratuity_cents"] == 1000  # not 2000
+
+    def test_outputs_explain_themselves(self, admin, roster):
+        out = self._put(admin, roster, door_worked=[roster["Kelly"]]).json()["computed"]
+        rows = {p["name"]: p for p in out["foh"]}
+        assert rows["Kelly"]["door"] is True and rows["Bree"]["door"] is False
+        assert rows["Kelly"]["hours"] == 4.0            # hours worked, unchanged
+        assert rows["Kelly"]["weighted_hours"] == 2.0   # what the split used
+        assert out["door_weight"] == "1/2"              # exact rate, for audit
+        assert out["totals"]["total_weighted_hours"] == 9.0
+        # the published rate must reproduce each payout by hand
+        rate = out["totals"]["tips_per_hour"]
+        for p in out["foh"]:
+            assert round(rate * p["weighted_hours"], 2) == p["tips_cents"] / 100
+
+    def test_conservation_with_door_shift(self, admin, roster):
+        out = self._put(admin, roster, door_worked=[roster["Kelly"]]).json()["computed"]
+        assert sum(p["tips_cents"] for p in out["foh"]) == out["totals"]["foh_pool_cents"]
+        assert (sum(p["gratuity_cents"] for p in out["foh"])
+                == out["totals"]["auto_gratuity_cents"])
+
+    def test_no_door_mark_matches_old_behaviour(self, admin, roster):
+        """Days saved before the ruling carry no door_worked key at all: the
+        pool splits over raw hours (11h), so Kelly keeps her full 4/11."""
+        out = self._put(admin, roster).json()["computed"]
+        rows = {p["name"]: p for p in out["foh"]}
+        assert rows["Kelly"]["tips_cents"] == 3273   # 9000 * 4/11
+        assert rows["Bree"]["tips_cents"] == 5727    # 9000 * 7/11
+        assert rows["Kelly"]["door"] is False
+        assert rows["Kelly"]["weighted_hours"] == 4.0
+
+    def test_boh_cannot_work_the_door(self, admin, roster):
+        r = self._put(admin, roster, door_worked=[roster["Benito"]])
+        assert r.status_code == 422
+        assert "door" in r.text.lower()
+
+    def test_duplicate_door_entry_rejected(self, admin, roster):
+        r = self._put(admin, roster,
+                      door_worked=[roster["Kelly"], roster["Kelly"]])
+        assert r.status_code == 422
+
+    def test_weight_is_configurable_and_snapshot_records_it(self, admin, roster):
+        try:
+            assert admin.put("/api/settings",
+                             json={"tl_door_weight": "1"}).status_code == 200
+            out = self._put(admin, roster, door_worked=[roster["Kelly"]]).json()["computed"]
+            rows = {p["name"]: p for p in out["foh"]}
+            # weight 1 = no reduction: same 4/11 split as an unmarked day
+            assert rows["Kelly"]["tips_cents"] == 3273
+            assert out["door_weight"] == "1"
+        finally:
+            admin.put("/api/settings", json={"tl_door_weight": "0.5"})
+
+    def test_weight_out_of_range_rejected(self, admin):
+        for bad in ("2", "-0.5", "abc"):
+            assert admin.put("/api/settings",
+                             json={"tl_door_weight": bad}).status_code == 422, bad
+
+    def test_export_reports_credited_hours(self, admin, roster):
+        assert self._put(admin, roster, door_worked=[roster["Kelly"]]).status_code == 200
+        assert admin.post(f"/api/days/{self.DOOR_DAY}/finalize").status_code == 200
+        r = admin.get(f"/api/periods/{self.DOOR_DAY}/export.csv")
+        lines = r.text.strip().splitlines()
+        cols = lines[0].split(",")
+        hrs, credited = cols.index("FOH Hours"), cols.index("Credited Hours")
+        rows = {l.split(",")[0]: l.split(",") for l in lines[1:]}
+        # period totals span other finalized days in this module, so compare the
+        # gap: hours worked stay truthful, credited hours drop by the 2h halved
+        assert float(rows["Kelly"][hrs]) - float(rows["Kelly"][credited]) == 2.0
+        # Bree never worked the door — her two columns must agree exactly
+        assert float(rows["Bree"][hrs]) == float(rows["Bree"][credited])

@@ -249,6 +249,17 @@ tfoot td { font-weight: 700; border-bottom: 0; }
   min-height: 0; margin: 2px 0 8px;
 }
 
+/* step-2 door/host toggle — per-day half tip credit (owner ruling 2026-07-29).
+   Deliberately quiet when off so a normal night reads as normal. */
+.doorbtn {
+  border: 1px solid var(--line); border-radius: 10px; background: #0f1115;
+  color: var(--muted); font-size: .74rem; font-weight: 700; letter-spacing: .03em;
+  text-transform: uppercase; min-height: 44px; padding: 0 11px;
+}
+.doorbtn.on {
+  background: rgba(94, 176, 220, .16); border-color: #5eb0dc; color: #5eb0dc;
+}
+
 /* step-2 kitchen chips */
 .bohgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 6px 8px; }
 .bohgrid .chip {
@@ -272,7 +283,15 @@ tfoot td { font-weight: 700; border-bottom: 0; }
 .ptable .prow:last-child { border-bottom: 0; }
 .ptable .phead { color: #5a5b63; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--line); }
 .ptable .cname { flex: 1; font-weight: 600; }
-.ptable .chrs { width: 52px; text-align: right; color: var(--muted); }
+/* 64px (not 52) so a door row's "D 2/4" fits without wrapping */
+.ptable .chrs { width: 64px; text-align: right; color: var(--muted); white-space: nowrap; }
+/* door shift: "D 2/4" — credited hours, then hours actually worked */
+.ptable .chrs .doormark {
+  display: inline-block; background: rgba(94, 176, 220, .18); color: #5eb0dc;
+  border-radius: 4px; padding: 0 4px; font-size: .66rem; font-weight: 800;
+  vertical-align: 1px;
+}
+.ptable .chrs .rawhrs { color: #5a5b63; font-size: .78rem; }
 .ptable .ctips { width: 76px; text-align: right; }
 .ptable .cgrat { width: 66px; text-align: right; color: var(--muted); }
 

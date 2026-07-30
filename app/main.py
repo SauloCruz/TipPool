@@ -16,6 +16,7 @@ import json
 import mimetypes
 import sqlite3
 from datetime import date, datetime
+from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -58,6 +59,9 @@ class DayInputsBody(BaseModel):
     auto_gratuity_cents: int = 0
     boh_worked: list[int] = []
     foh_hours: dict[int, float] = {}
+    # staff working the host/door that night — half tip credit per hour
+    # (tl_door_weight). Per-day, not a fixed role: staff work dual roles.
+    door_worked: list[int] = []
 
     @field_validator("foh_hours")
     @classmethod
@@ -72,6 +76,13 @@ class DayInputsBody(BaseModel):
     def _no_dupes(cls, v):
         if len(set(v)) != len(v):
             raise ValueError("duplicate employee in BOH roster")
+        return v
+
+    @field_validator("door_worked")
+    @classmethod
+    def _no_door_dupes(cls, v):
+        if len(set(v)) != len(v):
+            raise ValueError("duplicate employee in door roster")
         return v
 
 
@@ -131,6 +142,21 @@ class SettingsPatch(BaseModel):
     lf_pool_split_mode: dict | None = None
     # flag no-host days only when bussers < N (0 = never flag)
     lf_no_host_min_bussers: int | None = Field(default=None, ge=0, le=20)
+    # POOL_HOURS: tip credit per hour for a host/door shift ("0.5" = half, "1" = off)
+    tl_door_weight: str | None = None
+
+    @field_validator("tl_door_weight")
+    @classmethod
+    def _door_weight_valid(cls, v):
+        if v is None:
+            return v
+        try:
+            w = Fraction(str(v))
+        except (ValueError, ZeroDivisionError):
+            raise ValueError("door weight must be a number like 0.5")
+        if not 0 <= w <= 1:
+            raise ValueError("door weight must be between 0 and 1")
+        return str(v)
 
     @field_validator("lf_percentages")
     @classmethod
@@ -381,7 +407,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     settings_store.get_setting(conn, venue["id"], "lf_pool_split_mode"),
                     settings_store.get_setting(conn, venue["id"], "lf_no_host_min_bussers"),
                 )
-            return compute_outputs(inputs, emps)
+            return compute_outputs(
+                inputs, emps,
+                settings_store.get_setting(conn, venue["id"], "tl_door_weight"),
+            )
         except DayValidationError as exc:
             raise HTTPException(422, str(exc))
 
@@ -1223,17 +1252,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 s = staff.setdefault(line["employee_id"], {
                     "employee_id": line["employee_id"], "name": line["name"],
                     "tips_cents": 0, "gratuity_cents": 0, "boh_cents": 0,
-                    "days": 0, "hours": 0.0,
+                    "days": 0, "hours": 0.0, "credited_hours": 0.0,
                 })
                 s["tips_cents"] += line["tips_cents"]
                 s["gratuity_cents"] += line["gratuity_cents"]
                 s["days"] += 1
                 s["hours"] += line["hours"]
+                # snapshots predating the 2026-07-29 door ruling have neither
+                # key: credited hours then equal hours worked
+                s["credited_hours"] += line.get("weighted_hours", line["hours"])
             for line in outputs["boh"]:
                 s = staff.setdefault(line["employee_id"], {
                     "employee_id": line["employee_id"], "name": line["name"],
                     "tips_cents": 0, "gratuity_cents": 0, "boh_cents": 0,
-                    "days": 0, "hours": 0.0,
+                    "days": 0, "hours": 0.0, "credited_hours": 0.0,
                 })
                 s["boh_cents"] += line["share_cents"]
                 s["days"] += 1
@@ -1480,8 +1512,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         f"{m['roundup_cents'] / 100:.2f}",
                     ])
         else:
+            # "FOH Hours" stays hours actually worked (what payroll needs);
+            # "Credited Hours" is the tip-weighted figure the split used, so a
+            # half-credit door shift explains its own smaller tip total.
             w.writerow(["Employee", "Pool Tips (FOH)", "Kitchen Share (BOH)", "Tips Total",
-                        "Auto Gratuity (wages)", "Days Worked", "FOH Hours"])
+                        "Auto Gratuity (wages)", "Days Worked", "FOH Hours",
+                        "Credited Hours"])
             for e in s["employees"]:
                 tips_total = e["tips_cents"] + e["boh_cents"]
                 w.writerow([
@@ -1492,6 +1528,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     f"{e['gratuity_cents'] / 100:.2f}",
                     e["days"],
                     f"{e['hours']:.2f}",
+                    f"{e.get('credited_hours', e['hours']):.2f}",
                 ])
         audit(conn, venue["id"], user["id"], "period_exported", "period", s["start"])
         conn.commit()

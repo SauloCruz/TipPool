@@ -391,11 +391,13 @@ class TestTLRegression:
         assert client.post(f"/api/days/{d}/finalize").status_code == 200
         r = client.get(f"/api/periods/{d}/export.csv")
         assert 'filename="tips_tavern-law_' in r.headers["content-disposition"]
-        # exact rows: engine math frozen (pool 1348.23 split 7/7, boh 56.40)
+        # exact rows: engine math frozen (pool 1348.23 split 7/7, boh 56.40).
+        # Credited Hours added 2026-07-29 with the door half-weight ruling; with
+        # no door shift it equals FOH Hours, so the money columns are unchanged.
         assert r.text.splitlines() == [
             "Employee,Pool Tips (FOH),Kitchen Share (BOH),Tips Total,"
-            "Auto Gratuity (wages),Days Worked,FOH Hours",
-            "Benito,0.00,56.40,56.40,0.00,1,0.00",
-            "Bree,674.12,0.00,674.12,54.00,1,7.00",
-            "Kelly,674.11,0.00,674.11,54.00,1,7.00",
+            "Auto Gratuity (wages),Days Worked,FOH Hours,Credited Hours",
+            "Benito,0.00,56.40,56.40,0.00,1,0.00,0.00",
+            "Bree,674.12,0.00,674.12,54.00,1,7.00,7.00",
+            "Kelly,674.11,0.00,674.11,54.00,1,7.00,7.00",
         ]

@@ -107,8 +107,10 @@ grat_payout[e]    = grat_per_hour * foh_hours[e]
 4. **Negative FOH pool** (BOH allocation > total tips — slow day edge case): do not
    silently pay negative tips. Flag the day for manager review and carry the shortfall
    as an explicit warning; owner decides policy.
-5. All FOH roles weigh equally per hour (servers, bartenders, support, door). No
-   role weighting in v1, but model it so weights could be added later.
+5. FOH roles weigh equally per hour (servers, bartenders, support) **except a
+   host/door shift, which earns half credit per hour** (owner ruling 2026-07-29;
+   `tl_door_weight`, marked per person per day — see the decisions log). The
+   engine's `foh_role_weights` map carries this and any future weighting.
 6. Every computed day stores a **snapshot** of inputs + outputs (immutable audit
    record). Recomputing after an edit creates a new version; history is retained.
 
@@ -283,3 +285,4 @@ Ship M2 to real use before building M3 — it already beats the spreadsheet.
 | LF salaried BOH (2026-07-06) | Kitchen staff flagged **always in pool** (chef Elpidio Torralba — salaried, never clocks in) are pre-selected on the monthly kitchen roster regardless of timecards. Stored rosters are never silently changed by the flag. |
 | Historical Excel import (2026-07-07) | **Dropped.** The app went live with real data; back-loading spreadsheet history is unnecessary. Do not build the §5 importer. Golden-file tests (already extracted) stay. |
 | Legacy Daily Review (2026-07-07) | **Retired.** `#/day-classic` route, `renderDayLegacy`, and cross-links removed; the stepper is the only day screen. Do not reintroduce. |
+| TL host/door shifts (2026-07-29) | A host/door shift earns **half an hour of tip credit per hour worked** (`tl_door_weight`, default 0.5, Setup-configurable 0–1). Marked **per person per day** with the Door toggle on the day screen (step 2) — NOT a fixed per-person role, because staff work dual roles (server/host, bartender/host). Applies to the tip pool **and** auto-gratuity (same weight map). Snapshots record the rate used, so changing the setting never rewrites finalized days. Split shifts (part floor, part door) are out of scope: adjust hours by hand on those rare nights. |

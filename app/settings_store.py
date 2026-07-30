@@ -46,6 +46,11 @@ DEFAULTS = {
     # no-host days re-split silently (low season runs thin); FLAG the day
     # only when fewer than this many bussers worked
     "lf_no_host_min_bussers": 3,
+    # POOL_HOURS (Tavern Law) — tip credit per hour for a host/door shift,
+    # marked per day on the day screen (staff work dual roles, so this is not
+    # a fixed per-person role). Owner ruling 2026-07-29: half credit, applied
+    # to the tip pool AND the auto-gratuity pool. "1" disables the reduction.
+    "tl_door_weight": "0.5",
 }
 
 

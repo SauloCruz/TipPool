@@ -5,9 +5,11 @@ handled in integer cents; hours as exact fractions. See CLAUDE.md §2 for the
 business rules this module implements.
 """
 
-__version__ = "1.1.0"  # 1.1: adds PERCENT_TIPOUT (La Fontana); POOL_HOURS unchanged
+__version__ = "1.2.0"  # 1.2: POOL_HOURS role weights live (door/host half credit)
+# 1.1: adds PERCENT_TIPOUT (La Fontana); POOL_HOURS unchanged
 
 from .core import (
+    DEFAULT_DOOR_WEIGHT,
     DayResult,
     ManagerInPoolError,
     compute_day,
@@ -30,6 +32,7 @@ from .percent_tipout import (
 )
 
 __all__ = [
+    "DEFAULT_DOOR_WEIGHT",
     "DayResult",
     "ManagerInPoolError",
     "compute_day",
