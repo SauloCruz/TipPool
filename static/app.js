@@ -103,6 +103,8 @@ const ISSUE_TEXT = {
     `Unknown Square team members clocked in (${d.join(", ")}). Link them in Setup, then pull again — hours and cash tips are blocked until then.`,
   missing_clockout: (d) =>
     `Missing clock-out: ${d.join(", ")} — their FOH hours were skipped; adjust manually if needed.`,
+  invalid_timecard: (d) =>
+    `Timecard with no duration (clock-out not after clock-in): ${d.join(", ")} — counted as 0 hours. Usually a same-minute double punch; fix it in Square and pull again if those hours should count.`,
   all_cash_tips_zero: () =>
     "Every declared cash tip is $0 — possible skipped declarations at clock-out.",
   uncataloged_line_items: (d) =>

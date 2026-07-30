@@ -63,8 +63,17 @@ with:
   `put_day` for hand-typed hours, so both paths store identical values; the
   day screen mirrors the rule via `computed.hours_increment`. Supersedes the
   2026-07-05 exact-minutes ruling — do not restore 0.01/half-up.
+- **Pulls never 500 on one bad punch (2026-07-29):** a timecard whose
+  clock-out is not after its clock-in (same-minute double punch, or a
+  backwards manual edit in Square) used to reach `clip_timecard` and raise,
+  failing the whole day's pull with a bare "Internal Server Error" (real case:
+  2026-07-25). Both extractors now report it as the `invalid_timecard` warning
+  (0 hours credited, declared cash still collected) instead of raising; the LF
+  path would previously have gone further and subtracted NEGATIVE hours. The
+  pull endpoint also wraps unexpected exceptions into a 500 that names the
+  date and the actual error, and logs the traceback.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **329 tests**.
+  **335 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.

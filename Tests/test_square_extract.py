@@ -308,3 +308,46 @@ class TestTimecards:
             timecard("TM_BREE", "2026-07-04T04:00:00Z", "2026-07-04T07:00:00Z"),
         ])
         assert out["foh_hours"] == {"1": 5.0}
+
+
+class TestInvalidTimecardInterval:
+    """Regression: 2026-07-25 crashed the whole pull with a bare 500 because
+    one bartender double-punched — clocked in and out in the same minute, so
+    clock_out was not after clock_in and clip_timecard raised. One bad punch
+    must never fail a day's pull."""
+
+    def test_zero_length_punch_does_not_raise(self):
+        out = run_extract([
+            # the real shape from 2026-07-25: same minute in and out
+            timecard("TM_BREE", "2026-07-04T08:28:00Z", "2026-07-04T08:28:00Z"),
+            timecard("TM_KELLY", "2026-07-04T00:00:00Z", "2026-07-04T07:00:00Z"),
+        ])
+        assert out["foh_hours"] == {"2": 7.0}          # Bree contributes nothing
+        codes = {i["code"] for i in out["issues"]}
+        assert "invalid_timecard" in codes
+        issue = next(i for i in out["issues"] if i["code"] == "invalid_timecard")
+        assert issue["severity"] == "warning"          # 0 hours is unambiguous
+        assert any("Bree" in d for d in issue["detail"])
+
+    def test_backwards_punch_does_not_raise(self):
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T04:00:00Z", "2026-07-04T02:00:00Z"),
+        ])
+        assert out["foh_hours"] == {}
+        assert "invalid_timecard" in {i["code"] for i in out["issues"]}
+
+    def test_good_punches_on_the_same_person_still_count(self):
+        """The bartender also had a valid 1-minute punch right after."""
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T08:28:00Z", "2026-07-04T08:28:00Z"),
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T07:00:00Z"),
+        ])
+        assert out["foh_hours"] == {"1": 7.0}
+        assert "invalid_timecard" in {i["code"] for i in out["issues"]}
+
+    def test_declared_cash_still_collected_from_a_bad_punch(self):
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T08:28:00Z", "2026-07-04T08:28:00Z",
+                     declared=1500),
+        ])
+        assert out["cash_tips_cents"] == 1500

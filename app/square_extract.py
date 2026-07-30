@@ -169,10 +169,11 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
     non-manager timecards. EXCLUDED (manager) timecards are ignored
     entirely — including their declared tips.
 
-    Hours (owner ruling 2026-07-05): still clipped to the tippable window,
-    but exact within it — clock times are never rounded; minutes/60 is
-    rounded to 2 decimals (increment 0.01), matching how Square displays
-    hours. No quarter-hour rounding."""
+    Hours: clipped to the tippable window, then rounded UP to the next
+    `increment` (0.05 h — owner ruling 2026-07-29). Clock times themselves are
+    never rounded. Timecards that can't yield a duration (no clock-out, or a
+    clock-out not after the clock-in) are reported as issues, never raised:
+    one bad punch must not fail the whole day's pull."""
     tz = ZoneInfo(tzname)
     window = windows[business_day.weekday()]
     w_start, w_end = window.bounds(business_day, tz)
@@ -184,6 +185,7 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
     nonzero_declared = False
     unmapped: list[str] = []
     missing_clockout: list[str] = []
+    bad_interval: list[str] = []
     cards = []
 
     for tc in timecards:
@@ -212,6 +214,20 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
                           "role": "FOH", "declared_cents": declared,
                           "missing_clockout": True})
             continue
+        # A clock-out that isn't after the clock-in (a same-minute double
+        # punch, or a backwards manual edit in Square) has no duration to
+        # clip. Report it and move on — one bad punch must never fail the
+        # whole day's pull.
+        t_in, t_out = _iso(tc["start_at"]), _iso(tc["end_at"])
+        if t_out <= t_in:
+            local_in = t_in.astimezone(tz).strftime("%H:%M")
+            local_out = t_out.astimezone(tz).strftime("%H:%M")
+            bad_interval.append(f"{emp['display_name']} ({local_in} → {local_out})")
+            cards.append({"employee_id": emp["id"], "name": emp["display_name"],
+                          "role": "FOH", "declared_cents": declared,
+                          "invalid_interval": True,
+                          "raw_hours": 0.0, "tippable_hours": 0.0})
+            continue
         breaks = [
             Break(_iso(b["start_at"]).astimezone(tz), _iso(b["end_at"]).astimezone(tz),
                   paid=bool(b.get("is_paid")))
@@ -239,6 +255,9 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
     if missing_clockout:
         issues.append({"severity": "warning", "code": "missing_clockout",
                        "detail": sorted(missing_clockout)})
+    if bad_interval:
+        issues.append({"severity": "warning", "code": "invalid_timecard",
+                       "detail": sorted(bad_interval)})
     if declared_any and not nonzero_declared:
         issues.append({"severity": "warning", "code": "all_cash_tips_zero",
                        "detail": "every declared cash tip is $0 — possible skipped declarations"})
@@ -339,6 +358,7 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
     server_cash: dict[str, int] = {}
     unmapped: list[str] = []
     missing_clockout: list[str] = []
+    bad_interval: list[str] = []
     mismatches: list[str] = []
     server_seen = False
     any_declared = False
@@ -372,6 +392,20 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
             continue
         start = _iso(tc["start_at"]).timestamp()
         end = _iso(tc["end_at"]).timestamp()
+        # Same guard as the POOL_HOURS path: a clock-out not after the
+        # clock-in has no duration. Without this a backwards punch would
+        # quietly subtract negative hours from the person's total.
+        if end <= start:
+            tzi = _iso(tc["start_at"]).tzinfo
+            bad_interval.append(
+                f"{emp['display_name']} "
+                f"({_iso(tc['start_at']).strftime('%H:%M')} → "
+                f"{_iso(tc['end_at']).astimezone(tzi).strftime('%H:%M')})")
+            cards.append({"employee_id": emp["id"], "name": emp["display_name"],
+                          "role": emp["pool_role"], "declared_cents": declared,
+                          "invalid_interval": True, "worked_hours": 0.0,
+                          "job_title": title})
+            continue
         seconds = end - start
         for b in tc.get("breaks", []):
             if b.get("is_paid") or not b.get("end_at"):
@@ -393,6 +427,9 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
     if missing_clockout:
         issues.append({"severity": "warning", "code": "missing_clockout",
                        "detail": sorted(missing_clockout)})
+    if bad_interval:
+        issues.append({"severity": "warning", "code": "invalid_timecard",
+                       "detail": sorted(bad_interval)})
     if mismatches:
         issues.append({"severity": "warning", "code": "role_mismatch",
                        "detail": mismatches})

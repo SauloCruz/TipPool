@@ -473,3 +473,41 @@ class TestMigration:
         conn.execute("INSERT INTO employee (venue_id, display_name, pool_role,"
                      " created_at) VALUES (2, 'Maria', 'SERVER', '2026-01-01')")
         conn.close()
+
+
+class TestPullFailureIsActionable:
+    """A pull touches whatever Square returns that day, so an unexpected shape
+    must come back as something the manager can act on — not a bare 500.
+    (2026-07-25: a same-minute double punch produced 'Internal Server Error'
+    with no clue which employee or date was at fault.)"""
+
+    # DAY gets finalized earlier in this module; use a fresh date
+    OTHER_DAY = "2026-07-12"
+
+    def test_zero_length_timecard_no_longer_fails_the_pull(self, client, fake, roster):
+        seed_square(fake)
+        fake.timecards = fake.timecards + [{
+            "team_member_id": "TM_BREE",
+            "start_at": "2026-07-04T08:28:00Z",
+            "end_at": "2026-07-04T08:28:00Z",          # same minute — no duration
+            "declared_cash_tip_money": money(0),
+        }]
+        r = client.post(f"/api/days/{self.OTHER_DAY}/pull")
+        assert r.status_code == 200, r.text
+        codes = {i["code"] for i in r.json()["square"]["issues"]}
+        assert "invalid_timecard" in codes
+
+    def test_unexpected_error_reports_reason_and_date(self, client, fake, roster,
+                                                      monkeypatch):
+        from app import sync
+
+        def boom(*a, **kw):
+            raise RuntimeError("kaboom from Square payload")
+
+        monkeypatch.setattr(sync, "pull_day", boom)
+        r = client.post(f"/api/days/{self.OTHER_DAY}/pull")
+        assert r.status_code == 500
+        detail = r.json()["detail"]
+        assert "kaboom from Square payload" in detail   # the actual reason
+        assert self.OTHER_DAY in detail                 # which day to look at
+        assert "not changed" in detail                  # nothing was written

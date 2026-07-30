@@ -13,6 +13,7 @@ import contextlib
 import csv
 import io
 import json
+import logging
 import mimetypes
 import sqlite3
 from datetime import date, datetime
@@ -45,6 +46,9 @@ INFO_FLAGS = {"no_host_resplit"}
 
 
 # ---------- request/response models ----------
+
+log = logging.getLogger("tippool")
+
 
 class LoginBody(BaseModel):
     email: str
@@ -1061,6 +1065,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             record = sync.pull_day(conn, client, venue, d, user["id"])
         except SquareError as exc:
             raise HTTPException(502, str(exc))
+        except Exception as exc:
+            # A pull touches whatever Square happens to return that day, so an
+            # unexpected shape must not surface as a bare "Internal Server
+            # Error" the manager can't act on. Log the traceback for us and
+            # hand back the actual reason.
+            log.exception("pull failed for %s on %s", venue["slug"], d)
+            raise HTTPException(
+                500,
+                f"Square pull failed for {d}: {type(exc).__name__}: {exc}. "
+                "The day was not changed — check the timecards for that date "
+                "in Square, or send this message along for support.",
+            )
         apply_pull(conn, venue, d, record, user["id"])
         conn.commit()
         return day_payload(conn, venue, d)
