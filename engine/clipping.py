@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo as _tzinfo
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING
 from typing import Iterable
 
-DEFAULT_ROUNDING_INCREMENT = Decimal("0.25")
+# Owner ruling 2026-07-29: credit hours in 0.05 steps, always rounded UP
+# (supersedes the 2026-07-05 exact-to-the-minute 0.01 ruling).
+DEFAULT_ROUNDING_INCREMENT = Decimal("0.05")
 
 
 @dataclass(frozen=True)
@@ -87,12 +89,23 @@ def _subtract(intervals: list[tuple[float, float]], cut: tuple[float, float]):
     return out
 
 
-def _round_hours(seconds: float, increment: Decimal | None) -> Decimal:
-    hours = Decimal(round(seconds)) / Decimal(3600)
+def round_hours_up(hours: Decimal, increment: Decimal | None) -> Decimal:
+    """Round hours UP to the next whole increment (owner ruling 2026-07-29:
+    "round up to the next 5 or 0" — 0.78 -> 0.80, 0.71 -> 0.75, 7.00 stays).
+
+    Always up, never to nearest: a partial increment is credited in full.
+    Supersedes the 2026-07-05 exact-to-the-minute ruling. Rounding up costs
+    nothing — the pool is fixed, so this only shifts relative shares slightly.
+    """
     if not increment:
         return hours
-    steps = (hours / increment).to_integral_value(rounding=ROUND_HALF_UP)
+    steps = (hours / increment).to_integral_value(rounding=ROUND_CEILING)
     return steps * increment
+
+
+def _round_hours(seconds: float, increment: Decimal | None) -> Decimal:
+    hours = Decimal(round(seconds)) / Decimal(3600)
+    return round_hours_up(hours, increment)
 
 
 def clip_timecard(

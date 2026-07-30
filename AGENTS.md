@@ -57,8 +57,14 @@ with:
   `totals.total_weighted_hours`; the CSV gained a "Credited Hours" column.
   NOTE `tips_per_hour` is now the rate per WEIGHTED hour (was raw hours — that
   reported a rate nobody was paid once a weight existed). Engine 1.2.0.
+- **Hours round UP to 0.05 (2026-07-29):** `rounding_increment` is now "0.05"
+  and `engine.round_hours_up` rounds with ROUND_CEILING, never to nearest
+  (0.78 -> 0.80). Applied in `clip_timecard` for Square pulls AND in
+  `put_day` for hand-typed hours, so both paths store identical values; the
+  day screen mirrors the rule via `computed.hours_increment`. Supersedes the
+  2026-07-05 exact-minutes ruling — do not restore 0.01/half-up.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **325 tests**.
+  **329 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.
@@ -221,10 +227,10 @@ grat_payout[e]    = grat_per_hour * foh_hours[e]
    returns, per timecard: `team_member_id`, clock-in/out, breaks, `wage.tip_eligible`,
    and `declared_cash_tip_money`. From this single pull derive:
    - **FOH tippable hours** — worked intervals minus unpaid breaks, clipped to the
-     tippable window (§2a), for non-manager FOH jobs. Hours are exact within the
-     window (owner ruling 2026-07-05): never round clock times; minutes/60
-     rounded to 2 decimals for display (increment configurable, default 0.01 —
-     no quarter-hour rounding).
+     tippable window (§2a), for non-manager FOH jobs. Clock times are never
+     rounded; the clipped total is then rounded UP to the next `rounding_
+     increment` (0.05 h — owner ruling 2026-07-29, superseding the 2026-07-05
+     exact-minutes 0.01 rule).
    - **BOH worked roster** — any BOH-job timecard that day.
    - **Cash tips** — Σ `declared_cash_tip_money` across all non-manager timecards.
    Map each team member's job to FOH / BOH / Manager-excluded via an **employee &
@@ -352,7 +358,7 @@ Ship M2 to real use before building M3 — it already beats the spreadsheet.
 | Pool membership | All employees except managers. Managers hard-blocked from all pools. |
 | Cash tips source | Σ `declared_cash_tip_money` from daily timecards; pooled regardless of who collected; manual override with audit log. |
 | BOH allocation | 5% food sales + 10% event food sales; even split among BOH who worked that day (any timecard counts, no window clipping for roster). |
-| Hours rounding (2026-07-05) | Tippable-window clipping stands, but hours are exact within the window like Square's display: clock times never rounded, minutes/60 rounded to 2 decimals (increment 0.01). No quarter-hour rounding. |
+| Hours rounding (2026-07-05) | ~~Hours exact within the window: minutes/60 to 2 decimals, increment 0.01.~~ **SUPERSEDED 2026-07-29** — see the round-up-to-0.05 row below. |
 | Venue model (M5) | TL+NT = one venue. La Fontana = separate venue, separate Square merchant, PERCENT_TIPOUT model. |
 | LF percentages (M5) | Server keeps 65%; 20% bussers, 10% host, 5% BOH — of each server's OWN tips. Configurable with effective dates; must sum to 100%. |
 | LF pool splits (M5) | **EVEN SPLIT** among role members who worked that day (busser, host, BOH pools). Hours-proportional toggle exists but ships OFF. |
@@ -372,3 +378,4 @@ Ship M2 to real use before building M3 — it already beats the spreadsheet.
 | Historical Excel import (2026-07-07) | **Dropped.** The app went live with real data; back-loading spreadsheet history is unnecessary. Do not build the §5 importer. Golden-file tests (already extracted) stay. |
 | Legacy Daily Review (2026-07-07) | **Retired.** `#/day-classic` route, `renderDayLegacy`, and cross-links removed; the stepper is the only day screen. Do not reintroduce. |
 | TL host/door shifts (2026-07-29) | A host/door shift earns **half an hour of tip credit per hour worked** (`tl_door_weight`, default 0.5, Setup-configurable 0–1). Marked **per person per day** with the Door toggle on the day screen (step 2) — NOT a fixed per-person role, because staff work dual roles (server/host, bartender/host). Applies to the tip pool **and** auto-gratuity (same weight map). Snapshots record the rate used, so changing the setting never rewrites finalized days. Split shifts (part floor, part door) are out of scope: adjust hours by hand on those rare nights. |
+| Hours rounding (updated 2026-07-29) | Credited tippable hours step in **0.05 and always round UP** ("to the next 5 or 0": 0.78 → 0.80, 0.71 → 0.75; exact multiples untouched). Applies to Square-pulled AND hand-typed hours — enforced server-side on save, mirrored in the day screen so the field shows what is stored. Clock times themselves are still never rounded and window clipping is unchanged. `rounding_increment` setting = "0.05". **Supersedes the 2026-07-05 exact-to-the-minute 0.01 ruling.** |

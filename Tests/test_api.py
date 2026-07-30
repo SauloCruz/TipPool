@@ -346,3 +346,47 @@ class TestDoorHalfWeight:
         assert float(rows["Kelly"][hrs]) - float(rows["Kelly"][credited]) == 2.0
         # Bree never worked the door — her two columns must agree exactly
         assert float(rows["Bree"][hrs]) == float(rows["Bree"][credited])
+
+
+class TestHoursRoundUp:
+    """Owner ruling 2026-07-29: credited hours step in 0.05 and always round
+    UP ("to the next 5 or 0"): 0.78 -> 0.80. Enforced server-side so typed
+    hours match Square-pulled ones."""
+
+    DAY = "2026-06-25"
+
+    def test_typed_hours_snap_up_on_save(self, admin, roster):
+        r = admin.put(f"/api/days/{self.DAY}", json={
+            "credit_tips_cents": 10000, "boh_worked": [],
+            "foh_hours": {str(roster["Bree"]): 0.78,     # owner's example
+                          str(roster["Kelly"]): 6.81,    # -> 6.85
+                          str(roster["Tyler"]): 7.0}})   # exact, untouched
+        assert r.status_code == 200, r.text
+        stored = r.json()["inputs"]["foh_hours"]
+        assert stored[str(roster["Bree"])] == 0.80
+        assert stored[str(roster["Kelly"])] == 6.85
+        assert stored[str(roster["Tyler"])] == 7.0
+
+    def test_payouts_use_the_rounded_hours(self, admin, roster):
+        out = admin.put(f"/api/days/{self.DAY}", json={
+            "credit_tips_cents": 10000, "boh_worked": [],
+            "foh_hours": {str(roster["Bree"]): 0.78,
+                          str(roster["Tyler"]): 9.2}},   # -> 9.20 (exact)
+        ).json()["computed"]
+        rows = {p["name"]: p for p in out["foh"]}
+        assert rows["Bree"]["hours"] == 0.80
+        # 100.00 over 10.00 credited hours = $10/h
+        assert rows["Bree"]["tips_cents"] == 800
+        assert rows["Tyler"]["tips_cents"] == 9200
+        assert out["hours_increment"] == 0.05
+
+    def test_rounding_never_breaks_conservation(self, admin, roster):
+        out = admin.put(f"/api/days/{self.DAY}", json={
+            "credit_tips_cents": 33337, "auto_gratuity_cents": 999,
+            "boh_worked": [],
+            "foh_hours": {str(roster["Bree"]): 3.31, str(roster["Kelly"]): 4.44,
+                          str(roster["Tyler"]): 0.02}},
+        ).json()["computed"]
+        assert sum(p["tips_cents"] for p in out["foh"]) == out["totals"]["foh_pool_cents"]
+        assert (sum(p["gratuity_cents"] for p in out["foh"])
+                == out["totals"]["auto_gratuity_cents"])

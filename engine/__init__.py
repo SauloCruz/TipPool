@@ -22,6 +22,7 @@ from .clipping import (
     TippableWindow,
     business_day_bounds,
     clip_timecard,
+    round_hours_up,
 )
 from .payments import Payment, net_credit_tip_cents
 from .percent_tipout import (
@@ -43,6 +44,7 @@ __all__ = [
     "TippableWindow",
     "business_day_bounds",
     "clip_timecard",
+    "round_hours_up",
     "Payment",
     "net_credit_tip_cents",
     "DEFAULT_PERCENTAGES",

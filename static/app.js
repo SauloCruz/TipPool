@@ -269,6 +269,12 @@ async function renderDay(dateArg) {
 
   /* ---- shared save/compute plumbing (same PUT payload as legacy) ---- */
   const moneyEls = {}, hourEls = {}, bohChecks = {}, doorChecks = {};
+  /** Round hours UP to the next whole increment, mirroring the server
+   *  (engine.round_hours_up). Float-safe: work in increment steps. */
+  function roundHoursUp(h) {
+    const inc = computed?.hours_increment || 0.05;
+    return parseFloat((Math.ceil((h / inc).toFixed(6)) * inc).toFixed(2));
+  }
   function collectInputs() {
     const out = { boh_worked: [], foh_hours: {}, door_worked: [] };
     for (const key of [...STEPPER_MONEY.map(([k]) => k),
@@ -487,7 +493,10 @@ async function renderDay(dateArg) {
       }
       function commitEdit() {
         const v = parseFloat(editInput.value);
-        hidden.value = String(Number.isFinite(v) && v >= 0 ? Math.min(v, 24) : 0);
+        // hours are credited in whole increments, rounded UP (owner
+        // 2026-07-29) — snap here so the field shows what the server stores
+        hidden.value = String(Number.isFinite(v) && v >= 0
+          ? roundHoursUp(Math.min(v, 24)) : 0);
         clockResolved.add(e.id);
         editWrap.hidden = true; valueBtn.hidden = false;
         scheduleSave(); refreshAll();

@@ -13,6 +13,7 @@ from fractions import Fraction
 
 import engine
 from engine import ManagerInPoolError, compute_day, compute_day_percent_tipout
+from engine.clipping import DEFAULT_ROUNDING_INCREMENT
 from engine.core import (
     DEFAULT_BOH_EVENT_FOOD_PCT,
     DEFAULT_BOH_FOOD_PCT,
@@ -59,13 +60,16 @@ def _dollars(cents: int) -> Decimal:
 
 
 def compute_outputs(inputs: dict, employees: dict[int, dict],
-                    door_weight=DEFAULT_DOOR_WEIGHT) -> dict:
+                    door_weight=DEFAULT_DOOR_WEIGHT,
+                    hours_increment=DEFAULT_ROUNDING_INCREMENT) -> dict:
     """employees: id -> {display_name, pool_role}. Raises DayValidationError
     on unknown/wrong-pool employees; the EXCLUDED hard-block lives in the
     engine itself and is re-raised with a clear message.
 
     `door_weight` is the per-hour tip credit for staff marked on the day's
-    `door_worked` list (venue setting tl_door_weight, default 1/2)."""
+    `door_worked` list (venue setting tl_door_weight, default 1/2).
+    `hours_increment` is reported so the UI can round typed hours the same way
+    the server stores them; hours arriving here are already rounded."""
     boh_ids = [int(e) for e in inputs["boh_worked"]]
     foh_hours = {int(k): v for k, v in inputs["foh_hours"].items()}
     # door_worked is absent from snapshots predating the 2026-07-29 ruling
@@ -129,6 +133,9 @@ def compute_outputs(inputs: dict, employees: dict[int, dict],
         # ("1/2" exact for audit; the float is for display arithmetic)
         "door_weight": str(door_w),
         "door_weight_num": float(door_w),
+        # hours are credited in whole steps of this, rounded up (owner
+        # 2026-07-29); the day screen mirrors it so typed hours snap on entry
+        "hours_increment": float(hours_increment),
         "totals": {
             "total_tips_cents": result.total_tips_cents,
             "boh_allocation_cents": result.boh_allocation_cents,

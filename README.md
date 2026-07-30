@@ -50,7 +50,7 @@ after auditing exactly those bugs in a production workbook, with three design ru
 | | Hourly pool (`POOL_HOURS`) | Percent tip-out (`PERCENT_TIPOUT`) |
 |---|---|---|
 | Who earns | Front-of-house pool by tippable hours; kitchen gets a % of food sales | Each server keeps 65% of their own tips; 20% / 10% / 5% tip out to bussers, host, kitchen |
-| Hours | Timecards clipped to the open-to-public window (prep and after-midnight work excluded), exact to the minute | Presence-based — single shift, checkbox roster, even splits |
+| Hours | Timecards clipped to the open-to-public window (prep and after-midnight work excluded), then rounded up to the next 0.05 h | Presence-based — single shift, checkbox roster, even splits |
 | Role weighting | Host/door shifts earn half credit per hour, marked per person per day (staff work dual roles); the rate is configurable and recorded on each snapshot | Fixed roles per person, no hourly weighting |
 | Kitchen | Daily even split of the food-sales allocation | Monthly pool: the 5% accumulates and is split among a roster chosen at payroll time |
 | Edge cases | Negative-pool days flagged, never paid negative | No-host nights re-route the host share to bussers; empty pools return to contributing servers — all flagged, all configurable |
@@ -131,7 +131,7 @@ Deliberately boring, in the best way:
 engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, window clipping)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
-Tests/      325 tests: golden days, engine properties, API contracts, sync, RBAC
+Tests/      329 tests: golden days, engine properties, API contracts, sync, RBAC
 ```
 
 Schema migrations are versioned and applied automatically at boot (currently **v7**).
@@ -241,7 +241,7 @@ working on the app should use git from the start of the task:
 **In production at two venues.** Daily entries, Square pulls, finalized snapshots, weekly
 cash payouts, and monthly payroll exports are live. The engine's golden-file suite
 reproduces three historical pay periods from the original spreadsheet to the cent, and
-the full suite stands at **325 passing tests**.
+the full suite stands at **329 passing tests**.
 
 Historical employee data in the public test fixtures is pseudonymized.
 

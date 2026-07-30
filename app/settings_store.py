@@ -26,10 +26,11 @@ DEFAULTS = {
     "tippable_windows": {
         str(wd): {"open_minutes": 17 * 60, "close_minutes": 24 * 60} for wd in range(7)
     },
-    # Owner ruling 2026-07-05: hours are exact-to-the-minute like Square's
-    # display (minutes/60, 2 decimals). Clock times are never rounded and
-    # there is no quarter-hour rounding; window clipping still applies.
-    "rounding_increment": "0.01",
+    # Owner ruling 2026-07-29: credit tippable hours in 0.05 steps, always
+    # rounded UP ("to the next 5 or 0": 0.78 -> 0.80). Applies to Square-pulled
+    # and hand-entered hours alike. Clock times themselves are never rounded;
+    # window clipping still applies. Supersedes the 2026-07-05 0.01 ruling.
+    "rounding_increment": "0.05",
     # When the business day ends, in minutes past midnight (120 = 2:00 AM).
     # Governs which calendar day a Square transaction/timecard belongs to —
     # late check settlements after midnight stay on the prior service day.

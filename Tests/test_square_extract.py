@@ -199,8 +199,9 @@ def timecard(tmid, start, end, declared=0, breaks=None):
 
 
 def run_extract(timecards):
-    # 0.01 = the app default since the 2026-07-05 owner ruling (exact minutes)
-    return extract_timecards(timecards, EMPS, DAY, WINDOWS, TZ, Decimal("0.01"))
+    # 0.05 = the app default since the 2026-07-29 owner ruling: credited
+    # hours step in 0.05 and always round UP (supersedes the 0.01 ruling)
+    return extract_timecards(timecards, EMPS, DAY, WINDOWS, TZ, Decimal("0.05"))
 
 
 class TestTimecards:
@@ -280,25 +281,26 @@ class TestTimecards:
         assert card["tippable_hours"] == 6.85
 
     def test_same_day_partial_minutes(self):
-        # 5:00 PM - 9:07 PM = 4h07m = 4.1166... -> 4.12 (not 4.00)
+        # 5:00 PM - 9:07 PM = 4h07m = 4.1166... -> rounds UP to 4.15
         out = run_extract([
             timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T04:07:00Z"),
         ])
-        assert out["foh_hours"] == {"1": 4.12}
+        assert out["foh_hours"] == {"1": 4.15}
 
     def test_second_precision_not_rounded_before_calc(self):
-        # 5:00:30 PM - 11:00:00 PM = 5h59m30s = 5.9917 -> 5.99
+        # 5:00:30 PM - 11:00:00 PM = 5h59m30s = 5.9917 -> rounds UP to 6.00.
+        # Seconds still reach the calc: truncating them first would give 5.95.
         out = run_extract([
             timecard("TM_BREE", "2026-07-04T00:00:30Z", "2026-07-04T06:00:00Z"),
         ])
-        assert out["foh_hours"] == {"1": 5.99}
+        assert out["foh_hours"] == {"1": 6.00}
 
     def test_overnight_shift_clipped_at_midnight_exact(self):
-        # 6:23 PM - 1:30 AM: tippable 6:23 PM - midnight = 5h37m = 5.62
+        # 6:23 PM - 1:30 AM: tippable 6:23 PM - midnight = 5h37m -> 5.65
         out = run_extract([
             timecard("TM_BREE", "2026-07-04T01:23:00Z", "2026-07-04T08:30:00Z"),
         ])
-        assert out["foh_hours"] == {"1": 5.62}
+        assert out["foh_hours"] == {"1": 5.65}
 
     def test_double_shift_hours_summed(self):
         out = run_extract([

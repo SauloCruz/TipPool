@@ -82,24 +82,39 @@ class TestBreaks:
 
 
 class TestRounding:
-    def test_round_down_to_quarter_hour(self):
+    """Owner ruling 2026-07-29: credited hours step in 0.05 and always round
+    UP — never to nearest. Supersedes the 2026-07-05 exact-minutes ruling."""
+
+    def test_owner_example_rounds_up(self):
+        # 47 minutes = 0.7833... -> 0.80, the case the owner raised
         w0, w1 = bounds(date(2026, 6, 16))
+        out = clip_timecard(dt(2026, 6, 16, 17, 0), dt(2026, 6, 16, 17, 47),
+                            window_start=w0, window_end=w1)
+        assert out.tippable_hours == Decimal("0.80")
+
+    def test_any_part_of_a_step_rounds_up_a_full_step(self):
+        w0, w1 = bounds(date(2026, 6, 16))
+        # 4h01m = 4.0166... -> 4.05 (nearest would have given 4.00)
+        out = clip_timecard(dt(2026, 6, 16, 17, 0), dt(2026, 6, 16, 21, 1),
+                            window_start=w0, window_end=w1)
+        assert out.tippable_hours == Decimal("4.05")
+        # 4h07m -> 4.15 (nearest would have given 4.10)
         out = clip_timecard(dt(2026, 6, 16, 17, 0), dt(2026, 6, 16, 21, 7),
                             window_start=w0, window_end=w1)
-        assert out.tippable_hours == Decimal("4.00")  # 4h07m -> 4.00
+        assert out.tippable_hours == Decimal("4.15")
 
-    def test_round_up_to_quarter_hour(self):
+    def test_exact_multiple_is_left_alone(self):
         w0, w1 = bounds(date(2026, 6, 16))
-        out = clip_timecard(dt(2026, 6, 16, 17, 0), dt(2026, 6, 16, 21, 8),
+        out = clip_timecard(dt(2026, 6, 16, 17, 0), dt(2026, 6, 16, 21, 0),
                             window_start=w0, window_end=w1)
-        assert out.tippable_hours == Decimal("4.25")  # 4h08m -> 4.25
+        assert out.tippable_hours == Decimal("4.00")
 
     def test_configurable_increment_and_no_rounding(self):
         w0, w1 = bounds(date(2026, 6, 16))
         args = dict(window_start=w0, window_end=w1)
         out = clip_timecard(dt(2026, 6, 16, 17, 0), dt(2026, 6, 16, 21, 7),
-                            rounding_increment=Decimal("0.05"), **args)
-        assert out.tippable_hours == Decimal("4.10")
+                            rounding_increment=Decimal("0.25"), **args)
+        assert out.tippable_hours == Decimal("4.25")
         out = clip_timecard(dt(2026, 6, 16, 17, 0), dt(2026, 6, 16, 21, 7),
                             rounding_increment=None, **args)
         assert out.tippable_seconds == 4 * 3600 + 7 * 60

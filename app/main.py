@@ -16,6 +16,7 @@ import json
 import mimetypes
 import sqlite3
 from datetime import date, datetime
+from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
@@ -36,7 +37,7 @@ from .periods import (VENUE_SCHEMES, next_period_scheme, period_days,
                       period_for_scheme, prev_period_scheme)
 from .square import SquareClient, SquareError
 from .square_extract import MUTABLE_WARNINGS
-from engine import distribute_cents
+from engine import distribute_cents, round_hours_up
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 # informational flags: shown as reminders, never mark a day as flagged
@@ -410,6 +411,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return compute_outputs(
                 inputs, emps,
                 settings_store.get_setting(conn, venue["id"], "tl_door_weight"),
+                settings_store.rounding_increment(
+                    settings_store.all_settings(conn, venue["id"])),
             )
         except DayValidationError as exc:
             raise HTTPException(422, str(exc))
@@ -840,6 +843,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for key, value in list(inputs.items()):
             if isinstance(value, dict):
                 inputs[key] = {str(k): v for k, v in value.items()}
+        # Hours are credited in whole increments, rounded UP (owner 2026-07-29).
+        # Enforced here so a hand-typed 0.78 is stored as 0.80 exactly like a
+        # Square-pulled one — the pull rounds in clip_timecard, this covers
+        # manual entry and overrides.
+        if venue["tip_model"] != "PERCENT_TIPOUT":
+            inc = settings_store.rounding_increment(
+                settings_store.all_settings(conn, venue["id"]))
+            inputs["foh_hours"] = {
+                k: float(round_hours_up(Decimal(str(v)), inc))
+                for k, v in inputs["foh_hours"].items()
+            }
         emps = employees_map(conn, venue["id"])
         computed = compute_or_422(conn, venue, inputs, emps)  # validate before saving
         # override audit: log any Square-pulled field the manager changed away
