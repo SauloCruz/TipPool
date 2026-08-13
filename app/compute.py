@@ -389,6 +389,14 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
         ),
         key=lambda r: r["name"],
     )
+    # Someone clocked in on an event job but no event money was entered: they
+    # are out of the daily pool and there is no event pool to pay them from,
+    # so they would earn nothing. Read it off the SHIFTS, not the payout rows —
+    # with no event pool such a person never appears in the payouts at all.
+    event_staff = sorted({
+        employees[int(sh.employee)]["display_name"]
+        for sh in shifts if role_side.get(sh.role) == "EVENT"
+    }) if not event else []
     out = {
         "model": "POINTS_HOURS",
         "engine_version": engine.__version__,
@@ -402,8 +410,10 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
             "boh_points_total": day.boh_points_total,
         },
         "flags": dict(day.flags),
+        "event_staff_unpaid": sorted(event_staff),
         "people": people,
     }
+    out["flags"]["event_staff_without_event_money"] = bool(event_staff)
     if event:
         out["event"] = {
             "pool_cents": event.pool_cents,

@@ -198,12 +198,12 @@ the policy's Bar Manager exception for free: a Bar Manager clocked in as
 |---|---|
 | `engine/points_hours.py` daily model + 24 tests | **Done** — conservation asserted |
 | `docs/M6-poquitos.md` (this file) | Done |
-| Square job title → role mapping | **Confirmed** — see §2a; still to be wired into Setup as an editable venue setting |
+| Square job title → role mapping | **Done** — venue settings `poq_job_roles` / `poq_roles`; Setup editing UI still to come |
 | Per-venue Square credentials | **Done** — token + location `LB3CVZKR3BMND` verified against the live account |
-| Venue row (slug `poquitos`, POINTS_HOURS) | Pending |
-| `compute.py` dispatch + day inputs shape | Pending |
-| Day screen (stepper) for POINTS_HOURS | Pending |
-| Period summary + CSV export | Pending |
+| Venue row (slug `poquitos`, POINTS_HOURS) | **Done** — seeded declaratively in `VENUE_SEEDS` |
+| `compute.py` dispatch + day inputs + Square pull path | **Done** |
+| Day screen (`renderDayPoq`) | **Done** — shifts with role chips, event section, live distribution |
+| Period summary + CSV export | Pending — the remaining piece before payroll day |
 | Event sub-model (`compute_event_points_hours`) + 17 tests | **Done** — daily/event pool membership, 3% per group, conservation asserted |
 
 Per-venue Square credentials, venue scoping, semi-monthly periods, RBAC, the

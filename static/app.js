@@ -91,9 +91,10 @@ const routes = {
 };
 
 function renderDayDispatch(dateArg) {
-  return ME.venue.tip_model === "PERCENT_TIPOUT"
-    ? renderDayLF(dateArg)
-    : renderDay(dateArg);
+  const model = ME.venue.tip_model;
+  if (model === "PERCENT_TIPOUT") return renderDayLF(dateArg);
+  if (model === "POINTS_HOURS") return renderDayPoq(dateArg);
+  return renderDay(dateArg);
 }
 
 const ISSUE_TEXT = {
@@ -103,6 +104,8 @@ const ISSUE_TEXT = {
     `Unknown Square team members clocked in (${d.join(", ")}). Link them in Setup, then pull again — hours and cash tips are blocked until then.`,
   missing_clockout: (d) =>
     `Missing clock-out: ${d.join(", ")} — their FOH hours were skipped; adjust manually if needed.`,
+  unmapped_job_title: (d) =>
+    `Unmapped Square job title${d.length > 1 ? "s" : ""}: ${d.join(", ")}. Map ${d.length > 1 ? "them" : "it"} in Setup and pull again — shifts are blocked until then, so nobody is silently valued at zero.`,
   invalid_timecard: (d) =>
     `Timecard with no duration (clock-out not after clock-in): ${d.join(", ")} — counted as 0 hours. Usually a same-minute double punch; fix it in Square and pull again if those hours should count.`,
   all_cash_tips_zero: () =>
@@ -1317,6 +1320,244 @@ async function renderDayLF(dateArg) {
 
   view.append(el("div", { class: "actionbar" },
     el("div", {}, statusEl), backBtn, primaryBtn));
+  refreshAll();
+}
+
+/* ---------- daily review: POINTS_HOURS (Poquitos, M6) ----------
+   Role rides on each shift (the Square job chosen at clock-in), so this
+   screen shows shifts rather than a per-person hours map. Points and pool
+   side come from the venue's role catalogue. */
+
+const POQ_SIDE_LABEL = { FOH: "Front of house", BOH: "Kitchen",
+                         EVENT: "Event staff", EXCLUDED: "Not in the pool" };
+
+async function renderDayPoq(dateArg) {
+  const dateStr = dateArg || ME.today;
+  const [day, employees, settings] = await Promise.all([
+    api(`/api/days/${dateStr}`),
+    api("/api/employees"),
+    api("/api/settings"),
+  ]);
+  const roles = settings.poq_roles || {};
+  const byId = Object.fromEntries(employees.map((e) => [e.id, e]));
+  const finalized = day.status === "finalized";
+  const inputs = day.inputs;
+  const sq = day.square;
+  let computed = day.computed;
+  let saveTimer = null, saving = false;
+
+  const moneyEls = {};
+  let shiftRows = (inputs.shifts || []).map((s) => ({ ...s }));
+
+  function collectInputs() {
+    return {
+      credit_tips_cents: centsFromInput(moneyEls.credit_tips_cents),
+      cash_tips_cents: centsFromInput(moneyEls.cash_tips_cents),
+      auto_gratuity_cents: centsFromInput(moneyEls.auto_gratuity_cents),
+      event_service_charge_cents: centsFromInput(moneyEls.event_service_charge_cents),
+      event_tips_cents: centsFromInput(moneyEls.event_tips_cents),
+      shifts: shiftRows.filter((s) => s.hours > 0 || s.role)
+        .map((s) => ({ employee_id: s.employee_id, role: s.role, hours: s.hours })),
+    };
+  }
+
+  const statusEl = el("span", { class: "status" },
+    finalized ? `Finalized ${day.finalized_at?.slice(0, 10) || ""}` : "");
+  function scheduleSave() {
+    if (finalized) return;
+    statusEl.textContent = "…";
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 600);
+  }
+  async function saveNow() {
+    if (finalized) return;
+    if (saving) { scheduleSave(); return; }
+    saving = true;
+    try {
+      const updated = await api(`/api/days/${dateStr}`,
+        { method: "PUT", body: collectInputs() });
+      computed = updated.computed;
+      statusEl.textContent = "Saved";
+      refreshAll();
+    } catch (e) {
+      statusEl.textContent = "";
+      toast(e.message, true);
+    } finally { saving = false; }
+  }
+
+  const nice = new Date(dateStr + "T12:00:00").toLocaleDateString(undefined,
+    { weekday: "short", month: "short", day: "numeric" });
+  view.append(el("div", { class: "row spread", style: "margin:6px 0 2px" },
+    el("div", {},
+      el("h1", { style: "margin:0" }, nice),
+      el("div", { class: "stepsub", style: "margin:0" },
+        `${ME.venue.name} · 80/20 points pool`)),
+    el("span", { class: `badge ${day.status}` }, day.status.replace("_", " "))));
+
+  /* ---- pull + money ---- */
+  const pullBtn = el("button", { class: "ghost small", type: "button" },
+    "⟳ Pull from Square");
+  const pullNote = el("span", { class: "hint" },
+    sq ? `Pulled ${sq.pulled_at?.slice(11, 16) || ""}` : "Not pulled yet");
+  pullBtn.addEventListener("click", async () => {
+    pullBtn.disabled = true;
+    try {
+      const updated = await api(`/api/days/${dateStr}/pull`, { method: "POST" });
+      toast("Pulled from Square");
+      location.reload();
+      return updated;
+    } catch (e) { toast(e.message, true); pullBtn.disabled = false; }
+  });
+  if (finalized) pullBtn.disabled = true;
+  view.append(el("div", { class: "pullbar" }, pullBtn, pullNote));
+
+  const issuesBox = el("div", {});
+  view.append(issuesBox);
+
+  const moneyCard = el("div", { class: "card" });
+  for (const [key, label] of [["credit_tips_cents", "Credit card tips"],
+                              ["cash_tips_cents", "Cash tips (declared)"],
+                              ["auto_gratuity_cents", "Auto-gratuity (separate line)"]]) {
+    const inp = el("input", { inputmode: "decimal", type: "text",
+      value: ((inputs[key] || 0) / 100).toFixed(2),
+      ...(finalized ? { disabled: "" } : {}) });
+    moneyEls[key] = inp;
+    inp.addEventListener("input", scheduleSave);
+    moneyCard.append(el("label", {}, label),
+      el("div", { class: "money" }, inp));
+  }
+  view.append(el("div", { class: "seclabel" }, "Tips pooled today"), moneyCard);
+
+  /* ---- shifts ---- */
+  const shiftCard = el("div", { class: "card", style: "padding:4px 12px" });
+  function drawShifts() {
+    shiftCard.textContent = "";
+    if (!shiftRows.length) {
+      shiftCard.append(el("div", { class: "note" },
+        "No shifts yet — pull from Square to load the day's timecards."));
+      return;
+    }
+    for (const s of shiftRows) {
+      const emp = byId[s.employee_id];
+      const meta = roles[s.role] || {};
+      const pts = parseFloat(meta.points ?? 0);
+      const side = meta.side || "?";
+      const credited = +(pts * (s.hours || 0)).toFixed(4);
+      const hoursInp = el("input", { inputmode: "decimal", type: "text",
+        value: String(s.hours ?? 0), style: "width:70px;text-align:right",
+        ...(finalized ? { disabled: "" } : {}) });
+      hoursInp.addEventListener("change", () => {
+        const v = parseFloat(hoursInp.value);
+        s.hours = Number.isFinite(v) && v >= 0 ? Math.min(v, 24) : 0;
+        scheduleSave(); refreshAll();
+      });
+      shiftCard.append(el("div", { class: "hrow" },
+        el("div", { class: "who" },
+          el("div", { class: "row", style: "gap:8px" },
+            el("span", { class: "nm" }, emp ? emp.display_name : `#${s.employee_id}`),
+            el("span", { class: `rolechip ${side.toLowerCase()}` }, s.role.replace(/_/g, " "))),
+          el("div", { class: "sub" },
+            side === "EXCLUDED" ? "Not in the pool"
+              : `${pts} pt/h · ${credited} points`)),
+        el("div", { class: "row", style: "flex:none;gap:6px" },
+          hoursInp, el("span", { class: "unit" }, "h"))));
+    }
+  }
+  view.append(el("div", { class: "seclabel" }, "Shifts — role from the Square clock-in"),
+              shiftCard);
+
+  /* ---- event ---- */
+  const eventCard = el("div", { class: "card" });
+  for (const [key, label] of [["event_service_charge_cents", "Event service charge (20%)"],
+                              ["event_tips_cents", "Event tips"]]) {
+    const inp = el("input", { inputmode: "decimal", type: "text",
+      value: ((inputs[key] || 0) / 100).toFixed(2),
+      ...(finalized ? { disabled: "" } : {}) });
+    moneyEls[key] = inp;
+    inp.addEventListener("input", scheduleSave);
+    eventCard.append(el("label", {}, label), el("div", { class: "money" }, inp));
+  }
+  eventCard.append(el("div", { class: "hint", style: "margin-top:8px" },
+    "Leave at 0 unless a private event ran. Event staff are whoever clocked in "
+    + "under an event job; support roles are tipped out 3% each from the FOH portion."));
+  view.append(el("div", { class: "seclabel" }, "Private event (optional)"), eventCard);
+
+  /* ---- computed ---- */
+  const poolsBox = el("div", { class: "pools" });
+  const tableBox = el("div", { class: "ptable" });
+  const eventBox = el("div", {});
+  view.append(el("div", { class: "seclabel" }, "Distribution"), poolsBox,
+              eventBox, tableBox);
+
+  function refreshAll() {
+    issuesBox.textContent = "";
+    for (const issue of (sq?.issues || [])) {
+      issuesBox.append(el("div",
+        { class: `flag ${issue.severity === "blocking" ? "bad" : ""}` },
+        (ISSUE_TEXT[issue.code] || (() => issue.code))(issue.detail)));
+    }
+    const t = computed?.totals || {};
+    poolsBox.textContent = "";
+    for (const [v, k] of [[t.total_tips_cents, "Pooled tips"],
+                          [t.foh_pool_cents, `FOH 80% · ${t.foh_points_total ?? 0} pts`],
+                          [t.boh_pool_cents, `Kitchen 20% · ${t.boh_points_total ?? 0} pts`],
+                          [t.auto_gratuity_cents, "Auto-gratuity"]]) {
+      poolsBox.append(el("div", { class: "pool" },
+        el("div", { class: "v" }, fmt(v || 0)), el("div", { class: "k" }, k)));
+    }
+
+    eventBox.textContent = "";
+    if (computed?.flags?.event_staff_without_event_money) {
+      const who = (computed.event_staff_unpaid || []).join(", ");
+      eventBox.append(el("div", { class: "flag" },
+        `${who} clocked in on an event job, but no event money is entered. `
+        + "They are out of the daily pool, so they would be paid nothing — "
+        + "enter the event's service charge and tips below, or fix the clock-in."));
+    }
+    if (computed?.event) {
+      const e = computed.event;
+      const groups = Object.entries(e.support_group_cents || {})
+        .map(([g, c]) => `${g.toLowerCase()} ${fmt(c)}`).join(" · ");
+      eventBox.append(el("div", { class: "flag" },
+        `Event pool ${fmt(e.pool_cents)} — FOH ${fmt(e.foh_portion_cents)}, `
+        + `kitchen ${fmt(e.boh_portion_cents)}. Support tip-outs: ${groups}. `
+        + `Event service staff share ${fmt(e.service_pool_cents)}.`));
+    }
+
+    tableBox.textContent = "";
+    const people = computed?.people || [];
+    tableBox.append(el("div", { class: "prow phead" },
+      el("span", { class: "cname" }, "Name"), el("span", { class: "chrs" }, "Pts"),
+      el("span", { class: "ctips" }, "Tips"), el("span", { class: "cgrat" }, "Event")));
+    for (const p of people) {
+      tableBox.append(el("div", { class: "prow" },
+        el("span", { class: "cname" }, esc(p.name)),
+        el("span", { class: "chrs" }, String(p.points ?? 0)),
+        el("span", { class: "ctips" }, fmt(p.tips_cents)),
+        el("span", { class: "cgrat" }, p.event_cents ? fmt(p.event_cents) : "—")));
+    }
+    if (!people.length) {
+      tableBox.append(el("div", { class: "note" }, "Nothing to distribute yet."));
+    }
+    drawShifts();
+  }
+
+  /* ---- finalize ---- */
+  const blocking = (sq?.issues || []).some((i) => i.severity === "blocking");
+  const finBtn = el("button", { class: "primary-grow", type: "button" },
+    finalized ? "Finalized" : "Finalize — lock this day");
+  finBtn.disabled = finalized || blocking;
+  finBtn.addEventListener("click", async () => {
+    if (!confirm("Finalize this day? It writes an immutable snapshot.")) return;
+    try {
+      await api(`/api/days/${dateStr}/finalize`, { method: "POST" });
+      toast("Day finalized");
+      location.reload();
+    } catch (e) { toast(e.message, true); }
+  });
+  view.append(el("div", { class: "actionbar" },
+    el("div", {}, statusEl), finBtn));
+
   refreshAll();
 }
 

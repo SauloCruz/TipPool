@@ -206,3 +206,35 @@ class TestSquarePull:
         assert "Sommelier" in codes["unmapped_job_title"]["detail"]
         # shifts must NOT be applied from a blocked pull
         assert body["inputs"]["shifts"] == []
+
+
+class TestEventStaffWithoutEventMoney:
+    """An event-role clock-in with no event money means that person is out of
+    the daily pool with no event pool to pay them — silent zero. Flag it."""
+
+    def test_flagged_when_event_money_is_missing(self, client, poq, staff):
+        out = client.put("/api/days/2026-08-14", headers=poq["h"], json={
+            "credit_tips_cents": 50000,
+            "shifts": [
+                {"employee_id": staff["Ana"], "role": "EVENT_SERVER", "hours": 6},
+                {"employee_id": staff["Ben"], "role": "SERVER", "hours": 6},
+            ]}).json()["computed"]
+        assert out["flags"]["event_staff_without_event_money"] is True
+        assert out["event_staff_unpaid"] == ["Ana"]
+
+    def test_not_flagged_once_the_event_money_is_entered(self, client, poq, staff):
+        out = client.put("/api/days/2026-08-14", headers=poq["h"], json={
+            "credit_tips_cents": 50000, "event_service_charge_cents": 100000,
+            "shifts": [
+                {"employee_id": staff["Ana"], "role": "EVENT_SERVER", "hours": 6},
+                {"employee_id": staff["Ben"], "role": "SERVER", "hours": 6},
+            ]}).json()["computed"]
+        assert out["flags"]["event_staff_without_event_money"] is False
+        assert out["event_staff_unpaid"] == []
+
+    def test_not_flagged_when_nobody_worked_an_event_role(self, client, poq, staff):
+        out = client.put("/api/days/2026-08-14", headers=poq["h"], json={
+            "credit_tips_cents": 50000,
+            "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 6}],
+        }).json()["computed"]
+        assert out["flags"]["event_staff_without_event_money"] is False
