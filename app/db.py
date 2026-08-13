@@ -109,6 +109,7 @@ VENUE_SEEDS = [
     # (slug, name, tip_model) — first entry adopts the existing venue row
     ("tavern-law", "Tavern Law", "POOL_HOURS"),
     ("la-fontana", "La Fontana Siciliana", "PERCENT_TIPOUT"),
+    ("poquitos", "Poquitos", "POINTS_HOURS"),
 ]
 
 

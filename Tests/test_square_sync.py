@@ -463,10 +463,12 @@ class TestMigration:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(day)")}
         assert "square_json" in cols
         assert conn.execute("SELECT display_name FROM employee").fetchone()[0] == "Bree"
-        # v3: venue gains slug + tip_model; La Fontana seeded; RBAC table exists
+        # v3: venue gains slug + tip_model; other venues seeded; RBAC exists
         venues = {r["slug"]: r["tip_model"] for r in
                   conn.execute("SELECT slug, tip_model FROM venue")}
-        assert venues == {"tavern-law": "POOL_HOURS", "la-fontana": "PERCENT_TIPOUT"}
+        assert venues == {"tavern-law": "POOL_HOURS",
+                          "la-fontana": "PERCENT_TIPOUT",
+                          "poquitos": "POINTS_HOURS"}
         assert conn.execute(
             "SELECT COUNT(*) FROM user_venue_access").fetchone()[0] == 0
         # widened role CHECK accepts LF roles, employee ids preserved

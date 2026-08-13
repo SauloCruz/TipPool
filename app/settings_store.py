@@ -52,7 +52,61 @@ DEFAULTS = {
     # a fixed per-person role). Owner ruling 2026-07-29: half credit, applied
     # to the tip pool AND the auto-gratuity pool. "1" disables the reduction.
     "tl_door_weight": "0.5",
+    # ---- POINTS_HOURS (Poquitos, M6) ----
+    # Role catalogue: points per hour and which pool the role feeds.
+    # side FOH/BOH share the daily split; EVENT is event-pool only (and out
+    # of the daily pool); EXCLUDED earns nothing anywhere. Owner rulings
+    # 2026-08-03 and 2026-08-13 — see docs/M6-poquitos.md.
+    "poq_roles": {
+        "BARTENDER": {"points": "1.25", "side": "FOH"},
+        "SHIFT_LEAD": {"points": "1.25", "side": "FOH"},
+        "SERVER": {"points": "1", "side": "FOH"},
+        "BARBACK": {"points": "0.5", "side": "FOH"},
+        "BAR_PREP": {"points": "0.5", "side": "FOH"},
+        "HOST": {"points": "0.5", "side": "FOH"},
+        "BUSSER": {"points": "0.5", "side": "FOH"},
+        "EXPEDITOR": {"points": "0.5", "side": "FOH"},
+        "FOOD_RUNNER": {"points": "0.5", "side": "FOH"},
+        "SOUS_CHEF": {"points": "1", "side": "BOH"},
+        "LINE_COOK": {"points": "1", "side": "BOH"},
+        "PREP_COOK": {"points": "1", "side": "BOH"},
+        "DISHWASHER": {"points": "1", "side": "BOH"},
+        "EVENT_SERVER": {"points": "1", "side": "EVENT"},
+        "EVENT_BARTENDER": {"points": "1.25", "side": "EVENT"},
+        "SHIFT_MANAGER": {"points": "0", "side": "EXCLUDED"},
+        "KITCHEN_MANAGER": {"points": "0", "side": "EXCLUDED"},
+        "OWNER": {"points": "0", "side": "EXCLUDED"},
+        "JANITORIAL": {"points": "0", "side": "EXCLUDED"},
+        "STAFF_TRAINER": {"points": "0", "side": "EXCLUDED"},
+        "TRAINING_SHIFT": {"points": "0", "side": "EXCLUDED"},
+    },
+    # Square job title (exactly as Square spells it) -> role above. A title
+    # seen on a timecard but missing here BLOCKS the day — never guess a rate.
+    "poq_job_roles": {
+        "Bartender": "BARTENDER",
+        "Shift Lead": "SHIFT_LEAD",
+        "Server": "SERVER",
+        "Bar Prep": "BAR_PREP",
+        "Busser": "BUSSER",
+        "Host": "HOST",
+        "Runner": "FOOD_RUNNER",
+        "Line Cook": "LINE_COOK",
+        "Prep Cook": "PREP_COOK",
+        "Dishwasher": "DISHWASHER",
+        "Event Server": "EVENT_SERVER",
+        "Shift manager": "SHIFT_MANAGER",
+        "Kitchen Manager": "KITCHEN_MANAGER",
+        "Owner": "OWNER",
+        "Janitorial": "JANITORIAL",
+        "Staff Trainer": "STAFF_TRAINER",
+        "Training Shift": "TRAINING_SHIFT",
+    },
+    # % of pooled tips to FOH; BOH takes the exact remainder.
+    "poq_foh_pct": "80",
+    # event support tip-out, per role group, of the event's FOH portion
+    "poq_support_pct": "3",
 }
+
 
 
 def get_raw(conn: sqlite3.Connection, venue_id: int, key: str, default=None):
@@ -114,3 +168,18 @@ def windows_by_weekday(settings: dict) -> dict[int, TippableWindow]:
 
 def rounding_increment(settings: dict) -> Decimal:
     return Decimal(settings["rounding_increment"])
+
+
+# ---- POINTS_HOURS (Poquitos) helpers: settings -> engine shapes ----
+
+def poq_role_points(settings: dict) -> dict[str, Decimal]:
+    return {r: Decimal(str(v["points"])) for r, v in settings["poq_roles"].items()}
+
+
+def poq_role_side(settings: dict) -> dict[str, str]:
+    return {r: v["side"] for r, v in settings["poq_roles"].items()}
+
+
+def poq_job_roles(settings: dict) -> dict[str, str]:
+    """Square job title (verbatim) -> role key."""
+    return dict(settings["poq_job_roles"])

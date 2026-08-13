@@ -22,6 +22,7 @@ from . import settings_store
 from .db import audit, utcnow
 from .square import SquareClient
 from .square_extract import (
+    extract_timecards_poq,
     build_catalog_lookup,
     extract_auto_gratuity,
     extract_credit_tips,
@@ -35,8 +36,11 @@ SQUARE_FIELDS = ("food_sales_cents", "credit_tips_cents", "auto_gratuity_cents",
                  "cash_tips_cents", "boh_worked", "foh_hours")
 LF_SQUARE_FIELDS = ("server_tips", "server_cash_tips", "auto_gratuity_cents",
                     "hours", "unattributed_tips_cents")
+POQ_SQUARE_FIELDS = ("credit_tips_cents", "cash_tips_cents",
+                     "auto_gratuity_cents", "shifts")
 SQUARE_FIELDS_BY_MODEL = {"POOL_HOURS": SQUARE_FIELDS,
-                          "PERCENT_TIPOUT": LF_SQUARE_FIELDS}
+                          "PERCENT_TIPOUT": LF_SQUARE_FIELDS,
+                          "POINTS_HOURS": POQ_SQUARE_FIELDS}
 
 
 def blocked_fields(square: dict | None) -> set[str]:
@@ -94,6 +98,9 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
     if venue["tip_model"] == "PERCENT_TIPOUT":
         return _pull_values_lf(payments, orders, timecards, emp_by_tmid,
                                settings, user_id)
+    if venue["tip_model"] == "POINTS_HOURS":
+        return _pull_values_poq(payments, orders, timecards, emp_by_tmid,
+                                settings, venue, user_id)
 
     var_ids = sorted({
         li["catalog_object_id"]
@@ -198,3 +205,44 @@ def nightly_target_day(now: datetime) -> date:
 def should_auto_sync(day_row: sqlite3.Row | None) -> bool:
     """Skip days a human already finalized; drafts and untouched days sync."""
     return day_row is None or day_row["status"] != "finalized"
+
+
+def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
+                     venue, user_id) -> dict:
+    """POINTS_HOURS (Poquitos): card tips, auto-gratuity, and one shift per
+    timecard carrying the Square job chosen at clock-in. No food sales — the
+    pool is a straight 80/20 of tips, not a % of food."""
+    tips = extract_credit_tips(payments)
+    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"])
+    labor = extract_timecards_poq(
+        timecards, emp_by_tmid, venue["timezone"],
+        settings_store.rounding_increment(settings),
+        settings_store.poq_job_roles(settings),
+    )
+
+    issues = labor["issues"]
+    blocked = {i["code"] for i in issues if i["severity"] == "blocking"}
+    values = {
+        "credit_tips_cents": tips["credit_tips_cents"],
+        "auto_gratuity_cents": grat["auto_gratuity_cents"],
+    }
+    if not blocked:
+        values["cash_tips_cents"] = labor["cash_tips_cents"]
+        values["shifts"] = [
+            {"employee_id": s["employee_id"], "role": s["role"], "hours": s["hours"]}
+            for s in labor["shifts"]
+        ]
+
+    return {
+        "pulled_at": utcnow(),
+        "pulled_by": user_id,
+        "values": values,
+        "issues": issues,
+        "raw": {
+            "payments": tips["payments"],
+            "service_charges": grat["charges"],
+            "shifts": labor["shifts"],
+            "counts": {"payments": len(payments), "orders": len(orders),
+                       "timecards": len(timecards)},
+        },
+    }

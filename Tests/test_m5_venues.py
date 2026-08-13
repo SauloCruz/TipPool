@@ -125,7 +125,8 @@ class TestVenueScoping:
     def test_me_reflects_selected_venue(self, client, venues):
         me = client.get("/api/me", headers=lf_headers(venues)).json()
         assert me["venue"]["slug"] == "la-fontana"
-        assert len(me["venues"]) == 2
+        assert {v["slug"] for v in me["venues"]} == {
+            "tavern-law", "la-fontana", "poquitos"}
         me_default = client.get("/api/me").json()
         assert me_default["venue"]["slug"] == "tavern-law"
 

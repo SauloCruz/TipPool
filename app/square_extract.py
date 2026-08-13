@@ -15,7 +15,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from engine import Break, TippableWindow, clip_timecard
+from engine import Break, TippableWindow, clip_timecard, round_hours_up
 
 MONEY_FIELDS_FROM_SQUARE = (
     "food_sales_cents", "credit_tips_cents", "auto_gratuity_cents", "cash_tips_cents",
@@ -440,3 +440,100 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
     return {"hours": {k: hours[k] for k in sorted(hours, key=int)},
             "server_cash_tips": {k: server_cash[k] for k in sorted(server_cash, key=int)},
             "issues": issues, "timecards": cards}
+
+
+# ---------- timecards: POINTS_HOURS (Poquitos, M6) ----------
+
+def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
+                          tzname: str, increment: Decimal,
+                          job_roles: dict[str, str]) -> dict:
+    """Turn a day's timecards into POINTS_HOURS shifts.
+
+    Role is read from each timecard's Square job (`wage.title`) — the job the
+    employee chose at clock-in — so multi-role staff and split nights are
+    credited correctly without any manual marking (owner ruling 2026-08-03).
+
+    Unlike Tavern Law there is NO tippable-window clipping: the Poquitos
+    policy pays on "the total number of hours worked". Unpaid breaks are still
+    deducted, and the total is rounded up to the venue's increment.
+
+    A job title with no mapping is BLOCKING — the day cannot be trusted until
+    someone says what it is worth (never guess a point value).
+    """
+    tz = ZoneInfo(tzname)
+    shifts: list[dict] = []
+    cash = 0
+    declared_any = False
+    nonzero_declared = False
+    unmapped_members: list[str] = []
+    unmapped_jobs: list[str] = []
+    missing_clockout: list[str] = []
+    bad_interval: list[str] = []
+
+    for tc in timecards:
+        tmid = tc.get("team_member_id", "?")
+        emp = emp_by_tmid.get(tmid)
+        if emp is None:
+            unmapped_members.append(tmid)
+            continue
+        title = (tc.get("wage") or {}).get("title")
+        role = job_roles.get(title)
+        if role is None:
+            unmapped_jobs.append(title or "(no job title)")
+            continue
+
+        declared = _amount(tc.get("declared_cash_tip_money"))
+        declared_any = True
+        nonzero_declared = nonzero_declared or declared > 0
+        cash += declared
+
+        if not tc.get("end_at"):
+            missing_clockout.append(emp["display_name"])
+            shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
+                           "role": role, "job_title": title, "hours": 0.0,
+                           "missing_clockout": True})
+            continue
+        t_in, t_out = _iso(tc["start_at"]), _iso(tc["end_at"])
+        if t_out <= t_in:
+            bad_interval.append(
+                f"{emp['display_name']} ({t_in.astimezone(tz).strftime('%H:%M')} → "
+                f"{t_out.astimezone(tz).strftime('%H:%M')})")
+            shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
+                           "role": role, "job_title": title, "hours": 0.0,
+                           "invalid_interval": True})
+            continue
+
+        seconds = t_out.timestamp() - t_in.timestamp()
+        for b in tc.get("breaks", []) or []:
+            if b.get("is_paid") or not b.get("end_at"):
+                continue
+            b0, b1 = _iso(b["start_at"]).timestamp(), _iso(b["end_at"]).timestamp()
+            seconds -= max(0.0, min(b1, t_out.timestamp()) - max(b0, t_in.timestamp()))
+        hours = round_hours_up(Decimal(round(seconds)) / 3600, increment)
+        shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
+                       "role": role, "job_title": title, "hours": float(hours)})
+
+    issues = []
+    if unmapped_members:
+        issues.append({"severity": "blocking", "code": "unmapped_team_member",
+                       "detail": sorted(set(unmapped_members)),
+                       "blocks": ["shifts", "cash_tips_cents"]})
+    if unmapped_jobs:
+        issues.append({"severity": "blocking", "code": "unmapped_job_title",
+                       "detail": sorted(set(unmapped_jobs)),
+                       "blocks": ["shifts"]})
+    if missing_clockout:
+        issues.append({"severity": "warning", "code": "missing_clockout",
+                       "detail": sorted(missing_clockout)})
+    if bad_interval:
+        issues.append({"severity": "warning", "code": "invalid_timecard",
+                       "detail": sorted(bad_interval)})
+    if declared_any and not nonzero_declared:
+        issues.append({"severity": "warning", "code": "all_cash_tips_zero",
+                       "detail": "every declared cash tip is $0 — possible skipped declarations"})
+
+    return {
+        "shifts": sorted(shifts, key=lambda s: (s["name"], s["role"])),
+        "cash_tips_cents": cash,
+        "issues": issues,
+    }

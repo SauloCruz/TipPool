@@ -31,7 +31,8 @@ from pydantic import BaseModel, Field, field_validator
 from . import auth as auth_mod
 from . import settings_store, sync
 from .compute import (EMPTY_INPUTS_BY_MODEL, DayValidationError,
-                      compute_lf_outputs, compute_outputs)
+                      compute_lf_outputs, compute_outputs,
+                      compute_poq_outputs)
 from .config import Settings
 from .db import SCHEMA_VERSION, audit, connect, init_db, utcnow
 from .periods import (VENUE_SCHEMES, next_period_scheme, period_days,
@@ -89,6 +90,30 @@ class DayInputsBody(BaseModel):
         if len(set(v)) != len(v):
             raise ValueError("duplicate employee in door roster")
         return v
+
+
+class PoqShiftBody(BaseModel):
+    """One timecard's worth of work. Role is the job chosen at clock-in."""
+    employee_id: int
+    role: str
+    hours: float = 0
+
+    @field_validator("hours")
+    @classmethod
+    def _sane(cls, v):
+        if not 0 <= v <= 24:
+            raise ValueError("hours must be 0-24")
+        return v
+
+
+class PoqDayInputsBody(BaseModel):
+    """POINTS_HOURS day inputs (Poquitos). All money integer cents."""
+    credit_tips_cents: int = 0
+    cash_tips_cents: int = 0
+    auto_gratuity_cents: int = 0
+    shifts: list[PoqShiftBody] = []
+    event_service_charge_cents: int = Field(default=0, ge=0)
+    event_tips_cents: int = Field(default=0, ge=0)
 
 
 class LFDayInputsBody(BaseModel):
@@ -412,6 +437,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     settings_store.get_setting(conn, venue["id"], "lf_pool_split_mode"),
                     settings_store.get_setting(conn, venue["id"], "lf_no_host_min_bussers"),
                 )
+            if venue["tip_model"] == "POINTS_HOURS":
+                st = settings_store.all_settings(conn, venue["id"])
+                return compute_poq_outputs(
+                    inputs, emps, st["poq_roles"], st["poq_job_roles"],
+                    st["poq_foh_pct"], st["poq_support_pct"],
+                )
             return compute_outputs(
                 inputs, emps,
                 settings_store.get_setting(conn, venue["id"], "tl_door_weight"),
@@ -665,6 +696,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     VALID_ROLES = {
         "POOL_HOURS": {"FOH", "BOH", "EXCLUDED"},
         "PERCENT_TIPOUT": {"SERVER", "BUSSER", "HOST", "BOH", "EXCLUDED"},
+        # POINTS_HOURS reads the real role off each timecard, so the
+        # person-level value is descriptive only — except EXCLUDED, which is
+        # the manager hard-block safety net on top of the excluded JOBS.
+        "POINTS_HOURS": {"FOH", "BOH", "EXCLUDED"},
     }
 
     def check_role(venue, role: str) -> None:
@@ -836,8 +871,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         row = day_row(conn, venue["id"], d)
         if row is not None and row["status"] == "finalized":
             raise HTTPException(409, "day is finalized — an admin must reopen it first")
-        model_cls = (LFDayInputsBody if venue["tip_model"] == "PERCENT_TIPOUT"
-                     else DayInputsBody)
+        model_cls = {"PERCENT_TIPOUT": LFDayInputsBody,
+                     "POINTS_HOURS": PoqDayInputsBody}.get(
+                         venue["tip_model"], DayInputsBody)
         try:
             parsed = model_cls(**body)
         except Exception as exc:
@@ -851,7 +887,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Enforced here so a hand-typed 0.78 is stored as 0.80 exactly like a
         # Square-pulled one — the pull rounds in clip_timecard, this covers
         # manual entry and overrides.
-        if venue["tip_model"] != "PERCENT_TIPOUT":
+        if venue["tip_model"] == "POOL_HOURS":
             inc = settings_store.rounding_increment(
                 settings_store.all_settings(conn, venue["id"]))
             inputs["foh_hours"] = {
@@ -960,7 +996,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def put_boh_roster(anchor: str, body: BohRosterBody, user: User, conn: DB,
                        venue: Venue):
         """LF monthly kitchen roster: who shares the month's BOH pool."""
-        if venue["tip_model"] != "PERCENT_TIPOUT":
+        if venue["tip_model"] == "POOL_HOURS":
             raise HTTPException(422, "monthly kitchen roster only applies to"
                                      " PERCENT_TIPOUT venues")
         start, _ = period_for_scheme(parse_date(anchor), "monthly")
@@ -996,7 +1032,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                          conn: DB, venue: Venue, scheme: str | None = None):
         """LF per-period cash payout overrides (weekly FOH / monthly kitchen).
         Values replace the ceil-to-$10 suggestion for the listed employees."""
-        if venue["tip_model"] != "PERCENT_TIPOUT":
+        if venue["tip_model"] == "POOL_HOURS":
             raise HTTPException(422, "cash payouts only apply to PERCENT_TIPOUT venues")
         sch = resolve_scheme(venue, scheme)
         start, _ = period_for_scheme(parse_date(anchor), sch)
@@ -1420,7 +1456,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         deliberately doesn't). Finalized days only. Auto-gratuity excluded
         (service charges are wages, not tips). Amounts are exact tips before
         any cash round-up. SSN/address are intentionally never stored."""
-        if venue["tip_model"] != "PERCENT_TIPOUT":
+        if venue["tip_model"] == "POOL_HOURS":
             raise HTTPException(
                 422, "Form 4070 reports are only available for tip-out venues;"
                      " the pooled model does not track individual tip receipt")

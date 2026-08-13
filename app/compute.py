@@ -12,7 +12,14 @@ from decimal import Decimal
 from fractions import Fraction
 
 import engine
-from engine import ManagerInPoolError, compute_day, compute_day_percent_tipout
+from engine import (
+    ManagerInPoolError,
+    Shift,
+    compute_day,
+    compute_day_percent_tipout,
+    compute_day_points_hours,
+    compute_event_points_hours,
+)
 from engine.clipping import DEFAULT_ROUNDING_INCREMENT
 from engine.core import (
     DEFAULT_BOH_EVENT_FOOD_PCT,
@@ -297,3 +304,114 @@ def compute_lf_outputs(inputs: dict, employees: dict[int, dict],
         "people": people,
         "pools": result.pools,
     }
+
+
+# ---------- POINTS_HOURS (Poquitos, M6) ----------
+
+EMPTY_INPUTS_POQ = {
+    "credit_tips_cents": 0,
+    "cash_tips_cents": 0,
+    "auto_gratuity_cents": 0,
+    # [{employee_id, role, hours}] — one entry per timecard, role from the
+    # Square job chosen at clock-in (owner ruling 2026-08-03)
+    "shifts": [],
+    # private / special event on this day (0 pool = no event)
+    "event_service_charge_cents": 0,
+    "event_tips_cents": 0,
+}
+
+EMPTY_INPUTS_BY_MODEL["POINTS_HOURS"] = EMPTY_INPUTS_POQ
+
+
+def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
+                        roles: dict, job_roles: dict,
+                        foh_pct="80", support_pct="3") -> dict:
+    """POINTS_HOURS outputs for snapshots/UI: the daily 80/20 points pool plus,
+    when the day carries event money, the event pool as well."""
+    role_points = {r: Decimal(str(v["points"])) for r, v in roles.items()}
+    role_side = {r: v["side"] for r, v in roles.items()}
+
+    problems = []
+    shifts = []
+    for row in inputs.get("shifts") or ():
+        eid = int(row["employee_id"])
+        emp = employees.get(eid)
+        if emp is None:
+            problems.append(f"unknown employee id {eid} on a shift")
+            continue
+        if row["role"] not in role_points:
+            problems.append(f"{emp['display_name']}: unmapped role {row['role']!r}")
+            continue
+        shifts.append(Shift(employee=str(eid), role=row["role"], hours=row["hours"]))
+    if problems:
+        raise DayValidationError("; ".join(problems))
+
+    excluded = {str(eid) for eid, e in employees.items() if e["pool_role"] == "EXCLUDED"}
+    try:
+        day = compute_day_points_hours(
+            credit_tips=_dollars(inputs["credit_tips_cents"]),
+            cash_tips=_dollars(inputs["cash_tips_cents"]),
+            auto_gratuity=_dollars(inputs["auto_gratuity_cents"]),
+            shifts=shifts, role_points=role_points, role_side=role_side,
+            foh_pct=Decimal(str(foh_pct)), excluded=excluded,
+        )
+    except ManagerInPoolError as exc:
+        raise DayValidationError(str(exc)) from exc
+
+    event_pool_cents = (int(inputs.get("event_service_charge_cents") or 0)
+                        + int(inputs.get("event_tips_cents") or 0))
+    event = None
+    if event_pool_cents:
+        event = compute_event_points_hours(
+            service_charge=_dollars(int(inputs.get("event_service_charge_cents") or 0)),
+            event_tips=_dollars(int(inputs.get("event_tips_cents") or 0)),
+            shifts=shifts, role_points=role_points, role_side=role_side,
+            foh_pct=Decimal(str(foh_pct)), support_pct=Decimal(str(support_pct)),
+        )
+
+    def name(eid: str) -> str:
+        return employees[int(eid)]["display_name"]
+
+    everyone = sorted(set(day.tips_payout_cents) | set(event.payout_cents if event else ()))
+    people = sorted(
+        (
+            {
+                "employee_id": int(eid),
+                "name": name(eid),
+                "side": day.side.get(eid, "EVENT"),
+                "hours": day.hours.get(eid, 0.0),
+                "points": day.points.get(eid, 0.0),
+                "tips_cents": day.tips_payout_cents.get(eid, 0),
+                "gratuity_cents": day.gratuity_payout_cents.get(eid, 0),
+                "event_cents": (event.payout_cents.get(eid, 0) if event else 0),
+            }
+            for eid in everyone
+        ),
+        key=lambda r: r["name"],
+    )
+    out = {
+        "model": "POINTS_HOURS",
+        "engine_version": engine.__version__,
+        "foh_pct": str(foh_pct),
+        "totals": {
+            "total_tips_cents": day.total_tips_cents,
+            "foh_pool_cents": day.foh_pool_cents,
+            "boh_pool_cents": day.boh_pool_cents,
+            "auto_gratuity_cents": day.auto_gratuity_cents,
+            "foh_points_total": day.foh_points_total,
+            "boh_points_total": day.boh_points_total,
+        },
+        "flags": dict(day.flags),
+        "people": people,
+    }
+    if event:
+        out["event"] = {
+            "pool_cents": event.pool_cents,
+            "foh_portion_cents": event.foh_portion_cents,
+            "boh_portion_cents": event.boh_portion_cents,
+            "service_pool_cents": event.service_pool_cents,
+            "support_group_cents": event.support_group_cents,
+            "support_pct": str(support_pct),
+        }
+        out["flags"].update({f"event_{k}": v for k, v in event.flags.items()})
+    return out
