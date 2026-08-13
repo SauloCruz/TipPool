@@ -61,7 +61,20 @@ DEFAULT_ROLE_SIDE = {
     # ONLY. Because the daily engine selects by side, these hours drop out of
     # the daily split automatically (owner ruling 2026-08-03).
     "EVENT_SERVER": "EVENT", "EVENT_BARTENDER": "EVENT",
+    # Side "EXCLUDED" earns nothing anywhere. Exclusion at Poquitos is a
+    # property of the JOB, not the person (owner ruling 2026-08-13): someone
+    # who bartends one night and runs a manager shift the next earns on the
+    # bartender hours only. Selecting by side gives that for free.
+    "SHIFT_MANAGER": "EXCLUDED", "KITCHEN_MANAGER": "EXCLUDED",
+    "OWNER": "EXCLUDED", "JANITORIAL": "EXCLUDED",
+    "STAFF_TRAINER": "EXCLUDED", "TRAINING_SHIFT": "EXCLUDED",
 }
+
+# Roles that earn nothing still need a points entry so they are "known" and
+# do not trip UnknownRoleError — the value is never used.
+DEFAULT_ROLE_POINTS.update({
+    r: Decimal("0") for r, side in DEFAULT_ROLE_SIDE.items() if side == "EXCLUDED"
+})
 
 # Event point values reuse the daily rates for the same work.
 DEFAULT_ROLE_POINTS_EVENT = {

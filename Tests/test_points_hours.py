@@ -370,3 +370,63 @@ class TestEventEdgeCases:
         with pytest.raises(ValueError):
             compute_event_points_hours(service_charge=100, support_pct=Decimal("40"),
                                        shifts=[Shift("A", "EVENT_SERVER", 1)])
+
+
+class TestJobLevelExclusion:
+    """Owner ruling 2026-08-13, after auditing the real Poquitos job list:
+    Shift manager, Kitchen Manager, Owner, Janitorial, Staff Trainer and
+    Training Shift earn nothing. Exclusion is a property of the JOB, not the
+    person — the same someone can earn on a Bartender shift the next night."""
+
+    EXCLUDED_JOBS = ["SHIFT_MANAGER", "KITCHEN_MANAGER", "OWNER",
+                     "JANITORIAL", "STAFF_TRAINER", "TRAINING_SHIFT"]
+
+    def test_each_excluded_job_earns_nothing(self):
+        for job in self.EXCLUDED_JOBS:
+            out = run(credit_tips=100, shifts=[
+                Shift("Srv", "SERVER", 5), Shift("X", job, 8),
+                Shift("Cook", "LINE_COOK", 5)])
+            assert "X" not in out.tips_payouts, job
+            assert out.tips_payouts["Srv"] == 80.00, job   # full FOH pool
+            assert out.tips_payouts["Cook"] == 20.00, job
+
+    def test_same_person_earns_on_the_tipped_shift_only(self):
+        out = run(credit_tips=1000, shifts=[
+            Shift("Dual", "BARTENDER", 4),        # 5.0 points — counts
+            Shift("Dual", "SHIFT_MANAGER", 4),    # excluded — no points
+            Shift("Srv", "SERVER", 5),            # 5.0 points
+            Shift("Cook", "LINE_COOK", 5)])
+        assert out.points["Dual"] == 5.0
+        assert out.hours["Dual"] == 4.0           # manager hours not counted
+        assert out.tips_payouts["Dual"] == 400.00
+        assert out.tips_payouts["Srv"] == 400.00
+
+    def test_excluded_jobs_do_not_dilute_the_pool(self):
+        """A manager shift must not shrink anyone else's share."""
+        without = run(credit_tips=100, shifts=[Shift("Srv", "SERVER", 5),
+                                               Shift("Cook", "LINE_COOK", 5)])
+        with_mgr = run(credit_tips=100, shifts=[Shift("Srv", "SERVER", 5),
+                                                Shift("Cook", "LINE_COOK", 5),
+                                                Shift("Mgr", "SHIFT_MANAGER", 9)])
+        assert without.tips_payout_cents == with_mgr.tips_payout_cents
+
+    def test_excluded_jobs_are_known_roles_not_errors(self):
+        """They must map cleanly — an excluded job is a mapped job, not an
+        unmapped one, so it never blocks the day."""
+        out = run(credit_tips=100, shifts=[Shift("Own", "OWNER", 3),
+                                           Shift("Srv", "SERVER", 3)])
+        assert out.tips_payouts["Srv"] == 80.00
+
+    def test_excluded_jobs_earn_no_gratuity_either(self):
+        out = run(credit_tips=100, auto_gratuity=100, shifts=[
+            Shift("Mgr", "SHIFT_MANAGER", 8), Shift("Srv", "SERVER", 5),
+            Shift("Cook", "LINE_COOK", 5)])
+        assert "Mgr" not in out.gratuity_payouts
+        assert out.gratuity_payouts["Srv"] == 80.00
+
+    def test_excluded_jobs_get_no_event_support_tip_out(self):
+        ev = compute_event_points_hours(service_charge=2000, shifts=[
+            Shift("EvSrv", "EVENT_SERVER", 5),
+            Shift("Jan", "JANITORIAL", 8), Shift("Bus", "BUSSER", 5)])
+        assert "Jan" not in ev.payout_cents
+        assert ev.support_payout_cents["Bus"] == 4800

@@ -135,14 +135,72 @@ should behave differently.
 
 ---
 
+## 2a. Square job title -> role mapping (CONFIRMED 2026-08-13)
+
+Poquitos Square account: **1 location, `LB3CVZKR3BMND`** ("Poquitos", 1000 E
+Pike St, America/Los_Angeles, production). Credentials live in `.env` as
+`SQUARE_ACCESS_TOKEN__POQUITOS` / `SQUARE_LOCATION_ID__POQUITOS`.
+
+17 jobs are configured on the account. Audited against a month of real
+timecards (172 cards, **every one carrying `wage.title`**; 5 of 30 people
+worked more than one job, one of them three).
+
+> **`is_tip_eligible` is `True` on all 17 jobs — including `Owner`.** It is
+> left at Square's default and carries no meaning here. Do NOT seed pool
+> membership from it (unlike the Tavern Law setup, where it was a useful hint).
+
+| Square job title | Role | Points | Side |
+|---|---|---|---|
+| `Bartender` | BARTENDER | 1.25 | FOH |
+| `Shift Lead` | SHIFT_LEAD | 1.25 | FOH |
+| `Server` | SERVER | 1.0 | FOH |
+| `Bar Prep` | BAR_PREP | 0.5 | FOH |
+| `Busser` | BUSSER | 0.5 | FOH |
+| `Host` | HOST | 0.5 | FOH |
+| `Runner` | FOOD_RUNNER | 0.5 | FOH |
+| `Line Cook` | LINE_COOK | 1.0 | BOH |
+| `Prep Cook` | PREP_COOK | 1.0 | BOH |
+| `Dishwasher` | DISHWASHER | 1.0 | BOH |
+| `Event Server` | EVENT_SERVER | 1.0 | **EVENT** (out of the daily pool) |
+| `Shift manager` | — | — | **EXCLUDED** |
+| `Kitchen Manager` | — | — | **EXCLUDED** |
+| `Owner` | — | — | **EXCLUDED** |
+| `Janitorial` | — | — | **EXCLUDED** |
+| `Staff Trainer` | — | — | **EXCLUDED** |
+| `Training Shift` | — | — | **EXCLUDED** |
+
+**Exclusion is a property of the JOB, not the person** (owner ruling
+2026-08-13). Someone who bartends Tuesday and works a Shift manager shift
+Wednesday earns on Tuesday's hours only — no per-person flag needed, and the
+excluded hours neither earn nor dilute anyone else's share. This also covers
+the policy's Bar Manager exception for free: a Bar Manager clocked in as
+`Bartender` simply earns like any bartender.
+
+### Notes and gaps
+
+- `Runner` is taken as the policy's **Food Runner** (0.5) and fills the
+  "expo/food runner" slot for the event 3% tip-out; there is no separate
+  `Expeditor` job on the account.
+- Policy roles with **no Square job**: Barback, Expeditor, Sous Chef. They are
+  kept in the defaults so they work if the jobs are ever added.
+- **There is no `Event Bartender` job.** If a bartender works a private event
+  today, whatever they clock in under decides their pool — clocked in as
+  `Bartender` puts their hours in the DAILY pool, not the event. Worth adding
+  an `Event Bartender` job in Square if that is not the intent.
+- A job title seen on a timecard but missing from this mapping blocks the day
+  (`UnknownRoleError`) rather than being guessed.
+
+---
+
 ## 3. Build state
 
 | Piece | State |
 |---|---|
 | `engine/points_hours.py` daily model + 24 tests | **Done** — conservation asserted |
 | `docs/M6-poquitos.md` (this file) | Done |
-| Square job title → role mapping (Setup) | Pending real job titles from the Poquitos account |
-| Venue row + per-venue Square credentials | Pending API key (`SQUARE_ACCESS_TOKEN__POQUITOS`) |
+| Square job title → role mapping | **Confirmed** — see §2a; still to be wired into Setup as an editable venue setting |
+| Per-venue Square credentials | **Done** — token + location `LB3CVZKR3BMND` verified against the live account |
+| Venue row (slug `poquitos`, POINTS_HOURS) | Pending |
 | `compute.py` dispatch + day inputs shape | Pending |
 | Day screen (stepper) for POINTS_HOURS | Pending |
 | Period summary + CSV export | Pending |

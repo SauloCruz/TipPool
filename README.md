@@ -131,7 +131,7 @@ Deliberately boring, in the best way:
 engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, window clipping)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
-Tests/      376 tests: golden days, engine properties, API contracts, sync, RBAC
+Tests/      382 tests: golden days, engine properties, API contracts, sync, RBAC
 ```
 
 Schema migrations are versioned and applied automatically at boot (currently **v7**).
@@ -241,7 +241,7 @@ working on the app should use git from the start of the task:
 **In production at two venues.** Daily entries, Square pulls, finalized snapshots, weekly
 cash payouts, and monthly payroll exports are live. The engine's golden-file suite
 reproduces three historical pay periods from the original spreadsheet to the cent, and
-the full suite stands at **376 passing tests**.
+the full suite stands at **382 passing tests**.
 
 Historical employee data in the public test fixtures is pseudonymized.
 
