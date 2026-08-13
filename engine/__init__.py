@@ -28,6 +28,10 @@ from .clipping import (
 from .payments import Payment, net_credit_tip_cents
 from .points_hours import (
     DEFAULT_MANAGER_POOL_ROLES,
+    DEFAULT_SUPPORT_GROUPS,
+    DEFAULT_SUPPORT_TIPOUT_PCT,
+    EventResult,
+    compute_event_points_hours,
     DEFAULT_POQ_FOH_PCT,
     DEFAULT_ROLE_POINTS,
     DEFAULT_ROLE_SIDE,
@@ -59,6 +63,10 @@ __all__ = [
     "Payment",
     "net_credit_tip_cents",
     "DEFAULT_MANAGER_POOL_ROLES",
+    "DEFAULT_SUPPORT_GROUPS",
+    "DEFAULT_SUPPORT_TIPOUT_PCT",
+    "EventResult",
+    "compute_event_points_hours",
     "DEFAULT_POQ_FOH_PCT",
     "DEFAULT_ROLE_POINTS",
     "DEFAULT_ROLE_SIDE",

@@ -227,3 +227,146 @@ class TestWorkedExample:
         assert out.tips_payouts["Line Cook"] == 342.86
         assert out.tips_payouts["Dishwasher"] == 257.14
         assert sum(out.tips_payout_cents.values()) == 300000
+
+
+# ---------- private / special events ----------
+
+from engine import compute_event_points_hours  # noqa: E402
+
+
+class TestEventStructure:
+    """Policy: pool = 20% service charge + event tips, split 80/20; the three
+    support groups each take 3% of the FOH portion; the rest goes to the event
+    service staff. Owner rulings 2026-08-03."""
+
+    CREW = [
+        Shift("EvSrv", "EVENT_SERVER", 5),      # 5.00 points
+        Shift("EvBar", "EVENT_BARTENDER", 5),   # 6.25 points
+        Shift("Bus", "BUSSER", 6),
+        Shift("Host", "HOST", 6),
+        Shift("Expo", "EXPEDITOR", 6),
+        Shift("Cook", "LINE_COOK", 8),
+    ]
+
+    def test_pool_splits_eighty_twenty(self):
+        out = compute_event_points_hours(service_charge=2000, shifts=self.CREW)
+        assert out.pool_cents == 200000
+        assert out.foh_portion_cents == 160000
+        assert out.boh_portion_cents == 40000
+
+    def test_three_percent_per_group_not_per_person(self):
+        out = compute_event_points_hours(service_charge=2000, shifts=self.CREW)
+        # 3% of the 1600.00 FOH portion, once per group -> 48.00 each
+        assert out.support_group_cents == {"BUSSER": 4800, "EXPO": 4800, "HOST": 4800}
+        assert out.service_pool_cents == 160000 - 3 * 4800
+
+    def test_a_group_share_is_divided_within_the_role(self):
+        """Two bussers share ONE 3% slice between them — not 3% each."""
+        out = compute_event_points_hours(service_charge=2000, shifts=[
+            Shift("EvSrv", "EVENT_SERVER", 5),
+            Shift("Bus1", "BUSSER", 6), Shift("Bus2", "BUSSER", 6)])
+        assert out.support_payout_cents["Bus1"] == 2400
+        assert out.support_payout_cents["Bus2"] == 2400
+        assert out.support_group_cents["BUSSER"] == 4800
+
+    def test_expo_and_food_runner_share_one_slice(self):
+        """The policy pairs them: 'busser, expo/food runner and host'."""
+        out = compute_event_points_hours(service_charge=2000, shifts=[
+            Shift("EvSrv", "EVENT_SERVER", 5),
+            Shift("Ex", "EXPEDITOR", 5), Shift("Run", "FOOD_RUNNER", 5)])
+        assert out.support_payout_cents["Ex"] == 2400
+        assert out.support_payout_cents["Run"] == 2400
+
+    def test_service_pool_is_points_times_hours(self):
+        out = compute_event_points_hours(service_charge=2000, shifts=self.CREW)
+        # 1456.00 over 11.25 points
+        assert out.service_payout_cents["EvBar"] == 80889   # 6.25 pts
+        assert out.service_payout_cents["EvSrv"] == 64711   # 5.00 pts
+        assert sum(out.service_payout_cents.values()) == out.service_pool_cents
+
+    def test_kitchen_takes_the_twenty_by_hours(self):
+        out = compute_event_points_hours(service_charge=2000, shifts=[
+            Shift("EvSrv", "EVENT_SERVER", 5),
+            Shift("Cook", "LINE_COOK", 6), Shift("Dish", "DISHWASHER", 2)])
+        assert out.boh_payout_cents == {"Cook": 30000, "Dish": 10000}
+
+    def test_everything_adds_back_to_the_pool(self):
+        out = compute_event_points_hours(service_charge=1234.56, event_tips=789.01,
+                                         shifts=self.CREW)
+        assert sum(out.payout_cents.values()) == out.pool_cents
+
+    def test_event_tips_join_the_service_charge(self):
+        out = compute_event_points_hours(service_charge=1000, event_tips=500,
+                                         shifts=self.CREW)
+        assert out.pool_cents == 150000
+
+
+class TestEventVsDailyPool:
+    """The clock-in role decides which pool you are in (owner 2026-08-03)."""
+
+    DAY = [
+        Shift("EvSrv", "EVENT_SERVER", 6),   # event only
+        Shift("Srv", "SERVER", 6),           # daily only
+        Shift("Bus", "BUSSER", 6),           # daily AND event support tip-out
+        Shift("Cook", "LINE_COOK", 6),
+    ]
+
+    def test_event_service_staff_are_out_of_the_daily_pool(self):
+        day = compute_day_points_hours(credit_tips=1000, shifts=self.DAY)
+        assert "EvSrv" not in day.tips_payouts
+        # the daily FOH pool is shared by the server and busser only
+        assert set(day.tips_payouts) == {"Srv", "Bus", "Cook"}
+
+    def test_support_staff_stay_in_the_daily_pool_and_get_the_tip_out(self):
+        day = compute_day_points_hours(credit_tips=1000, shifts=self.DAY)
+        event = compute_event_points_hours(service_charge=2000, shifts=self.DAY)
+        assert day.tips_payouts["Bus"] > 0        # still in the daily pool
+        assert event.support_payout_cents["Bus"] > 0   # and tipped out
+
+    def test_a_person_can_work_both_and_be_paid_from_both(self):
+        shifts = [Shift("Dani", "SERVER", 4),            # daily
+                  Shift("Dani", "EVENT_SERVER", 4),      # event
+                  Shift("Cook", "LINE_COOK", 4)]
+        day = compute_day_points_hours(credit_tips=1000, shifts=shifts)
+        event = compute_event_points_hours(service_charge=1000, shifts=shifts)
+        assert day.points["Dani"] == 4.0          # only the daily 4 hours count
+        assert event.service_payout_cents["Dani"] > 0
+
+    def test_support_tip_out_reaches_staff_who_never_worked_the_event(self):
+        """Owner ruling: the 3% goes to everyone in that role THAT DAY."""
+        event = compute_event_points_hours(service_charge=2000, shifts=[
+            Shift("EvSrv", "EVENT_SERVER", 5),
+            Shift("EarlyBus", "BUSSER", 8)])   # day shift, no event work
+        assert event.support_payout_cents["EarlyBus"] == 4800
+
+
+class TestEventEdgeCases:
+    def test_missing_support_role_keeps_the_money_with_event_staff(self):
+        """No busser worked: that 3% cannot vanish, so it stays in the service
+        pool and the event is flagged."""
+        out = compute_event_points_hours(service_charge=2000, shifts=[
+            Shift("EvSrv", "EVENT_SERVER", 5), Shift("Cook", "LINE_COOK", 5)])
+        assert out.flags["no_busser_worked"] is True
+        assert out.support_group_cents["BUSSER"] == 0
+        assert out.service_pool_cents == 160000          # nothing tipped out
+        assert sum(out.payout_cents.values()) == out.pool_cents
+
+    def test_no_event_service_staff_is_flagged(self):
+        out = compute_event_points_hours(service_charge=1000, shifts=[
+            Shift("Bus", "BUSSER", 5), Shift("Cook", "LINE_COOK", 5)])
+        assert out.flags["no_event_service_staff"] is True
+
+    def test_unknown_role_is_refused(self):
+        with pytest.raises(UnknownRoleError):
+            compute_event_points_hours(service_charge=100,
+                                       shifts=[Shift("A", "MIXOLOGIST", 5)])
+
+    def test_support_percentage_is_configurable(self):
+        out = compute_event_points_hours(service_charge=2000, support_pct=Decimal("5"),
+                                         shifts=TestEventStructure.CREW)
+        assert out.support_group_cents["BUSSER"] == 8000     # 5% of 1600.00
+
+    def test_impossible_support_percentage_rejected(self):
+        with pytest.raises(ValueError):
+            compute_event_points_hours(service_charge=100, support_pct=Decimal("40"),
+                                       shifts=[Shift("A", "EVENT_SERVER", 1)])

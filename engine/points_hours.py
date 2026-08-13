@@ -56,6 +56,28 @@ DEFAULT_ROLE_SIDE = {
     "FOOD_RUNNER": "FOH",
     "SOUS_CHEF": "BOH", "LINE_COOK": "BOH", "PREP_COOK": "BOH",
     "DISHWASHER": "BOH",
+    # Side "EVENT" is neither daily pool: Poquitos uses separate Square job
+    # titles for event work, and the policy puts that staff in the event pool
+    # ONLY. Because the daily engine selects by side, these hours drop out of
+    # the daily split automatically (owner ruling 2026-08-03).
+    "EVENT_SERVER": "EVENT", "EVENT_BARTENDER": "EVENT",
+}
+
+# Event point values reuse the daily rates for the same work.
+DEFAULT_ROLE_POINTS_EVENT = {
+    "EVENT_BARTENDER": Decimal("1.25"),
+    "EVENT_SERVER": Decimal("1"),
+}
+DEFAULT_ROLE_POINTS.update(DEFAULT_ROLE_POINTS_EVENT)
+
+# Support tip-out: 3% of the event's FOH portion PER ROLE GROUP (not per
+# person), each group's share then shared among everyone who worked that role
+# that day — they stay in the daily pool too (owner ruling 2026-08-03).
+DEFAULT_SUPPORT_TIPOUT_PCT = Decimal("3")
+DEFAULT_SUPPORT_GROUPS = {
+    "BUSSER": ("BUSSER",),
+    "EXPO": ("EXPEDITOR", "FOOD_RUNNER"),   # policy pairs "expo/food runner"
+    "HOST": ("HOST",),
 }
 
 # A pool-excluded person (manager) may still earn on a shift worked in one of
@@ -243,4 +265,162 @@ def compute_day_points_hours(
         side=sides,
         foh_points_total=float(foh_total),
         boh_points_total=float(boh_total),
+    )
+
+
+# ---------- private / special events ----------
+
+
+@dataclass(frozen=True)
+class EventResult:
+    """One event's distribution. `payouts` is the merged per-person total;
+    the component dicts show which rule produced each piece."""
+
+    pool: float
+    foh_portion: float
+    boh_portion: float
+    service_pool: float
+    payouts: dict[str, float]
+    pool_cents: int
+    foh_portion_cents: int
+    boh_portion_cents: int
+    service_pool_cents: int
+    payout_cents: dict[str, int]
+    service_payout_cents: dict[str, int] = field(default_factory=dict)
+    support_payout_cents: dict[str, int] = field(default_factory=dict)
+    boh_payout_cents: dict[str, int] = field(default_factory=dict)
+    support_group_cents: dict[str, int] = field(default_factory=dict)
+    flags: dict[str, bool] = field(default_factory=dict)
+
+
+def compute_event_points_hours(
+    *,
+    service_charge=0,
+    event_tips=0,
+    shifts: Iterable[Shift] = (),
+    role_points: Mapping[str, object] | None = None,
+    role_side: Mapping[str, str] | None = None,
+    foh_pct=DEFAULT_POQ_FOH_PCT,
+    support_pct=DEFAULT_SUPPORT_TIPOUT_PCT,
+    support_groups: Mapping[str, Iterable[str]] | None = None,
+) -> EventResult:
+    """Distribute one private/special event (Poquitos policy, §2 of the M6 doc).
+
+        pool         = service charge + event tips
+        foh_portion  = 80% of pool          boh_portion = the remainder
+        each support group takes `support_pct` of foh_portion (3% x 3 = 9%)
+        service_pool = foh_portion - those shares -> event service staff
+
+    `shifts` must be the WHOLE day's shifts, not just the event's: the support
+    tip-outs go to everyone who worked that role that day, whether or not they
+    were on the event. Event service staff are identified by their role's side
+    being "EVENT" — the job they clocked in under.
+    """
+    role_points = dict(role_points or DEFAULT_ROLE_POINTS)
+    role_side = dict(role_side or DEFAULT_ROLE_SIDE)
+    support_groups = {k: tuple(v) for k, v in
+                      (support_groups or DEFAULT_SUPPORT_GROUPS).items()}
+    shifts = [s for s in shifts]
+
+    unknown = sorted({s.role for s in shifts
+                      if s.role not in role_points or s.role not in role_side})
+    if unknown:
+        raise UnknownRoleError(
+            f"no points mapping for role(s): {', '.join(unknown)}")
+
+    pool_cents = to_cents(service_charge) + to_cents(event_tips)
+    pct = _as_fraction(foh_pct) / 100
+    if not 0 <= pct <= 1:
+        raise ValueError("foh_pct must be between 0 and 100")
+    foh_cents = int((pool_cents * pct + Fraction(1, 2)).__floor__())
+    boh_cents = pool_cents - foh_cents
+
+    sup_pct = _as_fraction(support_pct) / 100
+    if sup_pct < 0 or sup_pct * len(support_groups) > 1:
+        raise ValueError("support tip-outs cannot exceed the FOH portion")
+
+    support_payout: dict[str, int] = {}
+    group_cents: dict[str, int] = {}
+    flags = {}
+    for group, roles in sorted(support_groups.items()):
+        share = int((foh_cents * sup_pct + Fraction(1, 2)).__floor__())
+        # everyone who worked one of these roles TODAY, by hours (every role in
+        # a group carries the same point value, so hours and points agree)
+        weights: dict[str, Fraction] = {}
+        for s in shifts:
+            if s.role in roles:
+                weights[s.employee] = weights.get(s.employee, Fraction(0)) + _as_fraction(s.hours)
+        weights = {n: w for n, w in weights.items() if w > 0}
+        group_cents[group] = share
+        if not weights:
+            # nobody in that role worked: zeroing the group leaves the share
+            # inside service_cents below, so it stays with the event's FOH
+            # staff rather than vanishing
+            flags[f"no_{group.lower()}_worked"] = True
+            group_cents[group] = 0
+            continue
+        for name, c in distribute_cents(share, weights).items():
+            support_payout[name] = support_payout.get(name, 0) + c
+
+    service_cents = foh_cents - sum(group_cents.values())
+
+    # event service staff = whoever clocked in under an EVENT-side role
+    service_w: dict[str, Fraction] = {}
+    for s in shifts:
+        if role_side[s.role] != "EVENT":
+            continue
+        pts = _as_fraction(s.hours) * _as_fraction(role_points[s.role])
+        service_w[s.employee] = service_w.get(s.employee, Fraction(0)) + pts
+    service_w = {n: w for n, w in service_w.items() if w > 0}
+
+    service_payout: dict[str, int] = {}
+    if service_w:
+        service_payout = distribute_cents(service_cents, service_w)
+    else:
+        flags["no_event_service_staff"] = True
+
+    # kitchen: hours worked that day (all BOH roles are 1.0, so hours == points)
+    boh_w: dict[str, Fraction] = {}
+    for s in shifts:
+        if role_side[s.role] == "BOH":
+            boh_w[s.employee] = boh_w.get(s.employee, Fraction(0)) + _as_fraction(s.hours)
+    boh_w = {n: w for n, w in boh_w.items() if w > 0}
+    boh_payout: dict[str, int] = {}
+    if boh_w:
+        boh_payout = distribute_cents(boh_cents, boh_w)
+    else:
+        flags["no_boh_worked"] = True
+
+    merged: dict[str, int] = {}
+    for part in (service_payout, support_payout, boh_payout):
+        for name, c in part.items():
+            merged[name] = merged.get(name, 0) + c
+
+    # Conservation: everything handed out equals the pool, minus only the
+    # slices that genuinely had nobody to pay. An unclaimed support share is
+    # NOT one of them — it is already inside service_cents (its group was
+    # zeroed above), so counting it here too would double-count it.
+    undistributed = 0
+    if not service_w:
+        undistributed += service_cents
+    if not boh_w:
+        undistributed += boh_cents
+    assert sum(merged.values()) == pool_cents - undistributed
+
+    return EventResult(
+        pool=_cents(pool_cents),
+        foh_portion=_cents(foh_cents),
+        boh_portion=_cents(boh_cents),
+        service_pool=_cents(service_cents),
+        payouts={n: _cents(c) for n, c in merged.items()},
+        pool_cents=pool_cents,
+        foh_portion_cents=foh_cents,
+        boh_portion_cents=boh_cents,
+        service_pool_cents=service_cents,
+        payout_cents=merged,
+        service_payout_cents=service_payout,
+        support_payout_cents=support_payout,
+        boh_payout_cents=boh_payout,
+        support_group_cents=group_cents,
+        flags=flags,
     )

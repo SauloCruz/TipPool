@@ -104,22 +104,34 @@ host_share   = 3% of foh_portion   -> divided among hosts
 service_pool = foh_portion - 9%    -> event servers & bartenders
 ```
 
-### Still OPEN — do not invent these
+### Settled 2026-08-03 (second round) — engine built
 
-1. **Who receives each 3% support share?** The support roles stay in the daily
-   pool, so they are not clocked in under an event role. Is the share divided
-   among the support staff who *worked the event* (identified how — an event
-   support role too?), or among everyone in that role who worked that day?
-2. **How is `service_pool` divided among the event servers and bartenders?**
-   Points x hours as in the daily pool (bartender 1.25 / server 1.0), plain
-   hours, or evenly per head?
-3. **How is `boh_portion` divided?** By kitchen hours worked that day, evenly
-   per head, or among a named event crew?
-4. **The 3% administrative fee** — taken off the top of the event pool before
-   the 80/20, or charged in addition (so it never touches the staff pool)?
-5. Take-out catering 20% service charge -> "Chef and Manager": what split?
-6. Special events (Cinco de Mayo, Block Party) — same mechanics as a private
+| Rule | Ruling |
+|---|---|
+| Who shares each 3% | **Everyone who worked that role that day**, whether or not they were on the event. No event support roles needed in Square. |
+| `service_pool` split | **Points x hours**, same rates as daily (event bartender 1.25, event server 1.0). |
+| `boh_portion` split | **By kitchen hours worked that day** — same rule as the daily 20%. |
+| 3% administrative fee | **Charged in addition**, on top of the 20% service charge. It never touches the staff pool, so the engine does not model it; the full pool still splits 80/20. |
+
+Because every role inside a support group carries the same point value
+(busser/expo/host are all 0.5) and every BOH role is 1.0, "by hours" and
+"points x hours" give identical results there — no ambiguity survives.
+
+**Assumption flagged for confirmation:** if nobody worked a support role that
+day, that group's 3% has nowhere to go. The engine keeps it in `service_pool`
+(so it reaches the event's own staff) and raises a `no_<group>_worked` flag,
+rather than letting the money vanish. This mirrors the La Fontana precedent
+where an empty pool returns to the contributing staff. Say the word if it
+should behave differently.
+
+### Still OPEN
+
+1. Take-out catering 20% service charge -> "Chef and Manager": what split?
+2. Special events (Cinco de Mayo, Block Party) — same mechanics as a private
    event, or simply "everyone who worked shares the event tips equally"?
+3. The extra end-of-event host gratuity is "divided equally amongst the staff
+   working the event" — does that mean the event service staff only, or
+   everyone including support and kitchen?
 
 ---
 
@@ -127,14 +139,14 @@ service_pool = foh_portion - 9%    -> event servers & bartenders
 
 | Piece | State |
 |---|---|
-| `engine/points_hours.py` + 24 tests | **Done** — daily model, conservation asserted |
+| `engine/points_hours.py` daily model + 24 tests | **Done** — conservation asserted |
 | `docs/M6-poquitos.md` (this file) | Done |
 | Square job title → role mapping (Setup) | Pending real job titles from the Poquitos account |
 | Venue row + per-venue Square credentials | Pending API key (`SQUARE_ACCESS_TOKEN__POQUITOS`) |
 | `compute.py` dispatch + day inputs shape | Pending |
 | Day screen (stepper) for POINTS_HOURS | Pending |
 | Period summary + CSV export | Pending |
-| Event sub-model | Blocked on the questions in §2 |
+| Event sub-model (`compute_event_points_hours`) + 17 tests | **Done** — daily/event pool membership, 3% per group, conservation asserted |
 
 Per-venue Square credentials, venue scoping, semi-monthly periods, RBAC, the
 audit log and snapshot immutability all already exist from M3/M5 and need no
