@@ -190,6 +190,25 @@ the policy's Bar Manager exception for free: a Bar Manager clocked in as
 - A job title seen on a timecard but missing from this mapping blocks the day
   (`UnknownRoleError`) rather than being guessed.
 
+### Reporting
+
+Semi-monthly periods (1st–15th, 16th–EOM), the same as Tavern Law — the policy
+pays tips "through semi-monthly payroll", and there is no cash payout run.
+
+The CSV and the printable summary both carry **Points** alongside hours,
+because points are the audit trail: `tips ÷ points` is what one point was
+worth that period, so any row can be re-derived by hand. Event money is its
+own column — it comes from a different pool than the daily 80/20.
+
+| Column | Meaning |
+|---|---|
+| Tips (daily pool) | share of the 80/20 daily pool |
+| Event Payout | share of any private/special event that period |
+| Tips Total | the two added |
+| Auto Gratuity (wages) | separate payroll line, never merged with tips |
+| Days / Hours / Points | what the split was computed from |
+
+
 ---
 
 ## 3. Build state
@@ -203,7 +222,7 @@ the policy's Bar Manager exception for free: a Bar Manager clocked in as
 | Venue row (slug `poquitos`, POINTS_HOURS) | **Done** — seeded declaratively in `VENUE_SEEDS` |
 | `compute.py` dispatch + day inputs + Square pull path | **Done** |
 | Day screen (`renderDayPoq`) | **Done** — shifts with role chips, event section, live distribution |
-| Period summary + CSV export | Pending — the remaining piece before payroll day |
+| Period summary + CSV export + print summary | **Done** — semi-monthly, points carried through as the audit trail |
 | Event sub-model (`compute_event_points_hours`) + 17 tests | **Done** — daily/event pool membership, 3% per group, conservation asserted |
 
 Per-venue Square credentials, venue scoping, semi-monthly periods, RBAC, the

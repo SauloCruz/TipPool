@@ -180,7 +180,9 @@ async function renderVenuePicker() {
     const card = el("button", { class: "venuecard", type: "button" },
       el("div", { class: "vn" }, v.name),
       el("div", { class: "vm" },
-        v.tip_model === "PERCENT_TIPOUT" ? "Percent tip-out (65/20/10/5)" : "Hourly tip pool"));
+        v.tip_model === "PERCENT_TIPOUT" ? "Percent tip-out (65/20/10/5)"
+          : v.tip_model === "POINTS_HOURS" ? "Points pool (80/20)"
+          : "Hourly tip pool"));
     card.addEventListener("click", async () => {
       sessionStorage.setItem("venueId", String(v.id));
       ME = await api("/api/me");  // re-read scoped to the chosen venue
@@ -1736,6 +1738,23 @@ async function renderExport(anchorArg) {
         el("div", { class: "sub" },
           `total round-up ${fmt(p.totals.total_roundup_cents || 0)} · payroll month report stays exact`)));
     }
+  } else if (p.model === "POINTS_HOURS") {
+    // Points are shown because they are the audit trail: tips / points is
+    // what one point was worth, so any row can be checked by hand.
+    card.append(el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
+        el("th", { class: "num" }, "Event"), el("th", { class: "num" }, "Auto-grat"),
+        el("th", { class: "num" }, "Days"), el("th", { class: "num" }, "Hrs"),
+        el("th", { class: "num" }, "Pts"))),
+      el("tbody", {}, p.employees.map((s) => el("tr", {},
+        el("td", {}, esc(s.name)),
+        el("td", { class: "num" }, fmt(s.tips_cents)),
+        el("td", { class: "num" }, s.event_cents ? fmt(s.event_cents) : "—"),
+        el("td", { class: "num" }, fmt(s.gratuity_cents)),
+        el("td", { class: "num" }, s.days),
+        el("td", { class: "num" }, s.hours ? s.hours.toFixed(2) : "—"),
+        el("td", { class: "num" }, s.points ? (+s.points.toFixed(4)).toString() : "—"))))));
   } else {
     card.append(el("table", {},
       el("thead", {}, el("tr", {},
@@ -1959,6 +1978,7 @@ async function renderPrintSummary(anchorArg) {
       `${p.draft_dates.length} day(s) not finalized and excluded: ${p.draft_dates.join(", ")}`));
   }
   const isLF = p.model === "PERCENT_TIPOUT";
+  const isPoq = p.model === "POINTS_HOURS";
   const weekly = p.scheme === "weekly";
   const sheet = el("div", { class: "sheet" },
     el("div", { class: "sheethead" },
@@ -1974,6 +1994,9 @@ async function renderPrintSummary(anchorArg) {
         el("tr", {}, el("td", {}, "Busser pool"), el("td", { class: "num" }, fmt(t.pool_busser_cents || 0))),
         el("tr", {}, el("td", {}, "Host pool"), el("td", { class: "num" }, fmt(t.pool_host_cents || 0))),
         el("tr", {}, el("td", {}, "Kitchen pool (monthly)"), el("td", { class: "num" }, fmt(t.pool_boh_cents || 0))),
+      ] : isPoq ? [
+        el("tr", {}, el("td", {}, "Front of house (80%)"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),
+        el("tr", {}, el("td", {}, "Kitchen (20%)"), el("td", { class: "num" }, fmt(t.boh_pool_cents || 0))),
       ] : [
         el("tr", {}, el("td", {}, "Kitchen share"), el("td", { class: "num" }, fmt(t.boh_allocation_cents || 0))),
         el("tr", {}, el("td", {}, "FOH pool"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),
@@ -1990,6 +2013,11 @@ async function renderPrintSummary(anchorArg) {
         el("th", { class: "num" }, "Pool/Ret"), el("th", { class: "num" }, "Tips"),
         ...(weekly ? [el("th", { class: "num" }, "Cash paid"), el("th", { class: "num" }, "Round-up")] : []),
         el("th", { class: "num" }, "Gratuity"))
+    : isPoq
+    ? el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
+        el("th", { class: "num" }, "Event"), el("th", { class: "num" }, "Gratuity"),
+        el("th", { class: "num" }, "Days"), el("th", { class: "num" }, "Hours"),
+        el("th", { class: "num" }, "Points"))
     : el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
         el("th", { class: "num" }, "Gratuity"), el("th", { class: "num" }, "Days"),
         el("th", { class: "num" }, "Hours"));
@@ -2002,6 +2030,14 @@ async function renderPrintSummary(anchorArg) {
           ...(weekly ? [el("td", { class: "num" }, fmt(s.cash_payout_cents)),
                         el("td", { class: "num" }, fmt(s.roundup_cents))] : []),
           el("td", { class: "num" }, fmt(s.gratuity_cents)))
+      : isPoq
+      ? el("tr", {}, el("td", {}, esc(s.name)),
+          el("td", { class: "num" }, fmt(s.tips_cents)),
+          el("td", { class: "num" }, s.event_cents ? fmt(s.event_cents) : "—"),
+          el("td", { class: "num" }, fmt(s.gratuity_cents)),
+          el("td", { class: "num" }, s.days),
+          el("td", { class: "num" }, s.hours ? s.hours.toFixed(2) : "—"),
+          el("td", { class: "num" }, s.points ? (+s.points.toFixed(4)).toString() : "—"))
       : el("tr", {}, el("td", {}, esc(s.name)),
           el("td", { class: "num" }, fmt(s.tips_cents + s.boh_cents)),
           el("td", { class: "num" }, fmt(s.gratuity_cents)),

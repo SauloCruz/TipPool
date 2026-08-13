@@ -1262,13 +1262,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         by_date = {r["date"]: r for r in rows}
 
         is_lf = venue["tip_model"] == "PERCENT_TIPOUT"
+        is_poq = venue["tip_model"] == "POINTS_HOURS"
         boh_monthly = None
         days_out = []
-        totals = ({"total_tips_cents": 0, "auto_gratuity_cents": 0,
-                   "pool_busser_cents": 0, "pool_host_cents": 0,
-                   "pool_boh_cents": 0} if is_lf else
-                  {"total_tips_cents": 0, "boh_allocation_cents": 0,
-                   "foh_pool_cents": 0, "auto_gratuity_cents": 0})
+        if is_lf:
+            totals = {"total_tips_cents": 0, "auto_gratuity_cents": 0,
+                      "pool_busser_cents": 0, "pool_host_cents": 0,
+                      "pool_boh_cents": 0}
+        elif is_poq:
+            totals = {"total_tips_cents": 0, "foh_pool_cents": 0,
+                      "boh_pool_cents": 0, "auto_gratuity_cents": 0}
+        else:
+            totals = {"total_tips_cents": 0, "boh_allocation_cents": 0,
+                      "foh_pool_cents": 0, "auto_gratuity_cents": 0}
         staff: dict[int, dict] = {}
         draft_dates, flagged_dates = [], []
 
@@ -1298,6 +1304,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             for k in totals:
                 totals[k] += outputs["totals"].get(k, 0)
+            if is_poq:
+                for line in outputs["people"]:
+                    s_ = staff.setdefault(line["employee_id"], {
+                        "employee_id": line["employee_id"], "name": line["name"],
+                        "tips_cents": 0, "gratuity_cents": 0, "event_cents": 0,
+                        "days": 0, "hours": 0.0, "points": 0.0,
+                    })
+                    s_["tips_cents"] += line["tips_cents"]
+                    s_["gratuity_cents"] += line["gratuity_cents"]
+                    s_["event_cents"] += line.get("event_cents", 0)
+                    s_["hours"] += line["hours"]
+                    s_["points"] += line["points"]
+                    if line["hours"] or line.get("event_cents"):
+                        s_["days"] += 1
+                continue
             if is_lf:
                 for line in outputs["people"]:
                     s = staff.setdefault(line["employee_id"], {
@@ -1577,6 +1598,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         f"{m['cash_payout_cents'] / 100:.2f}",
                         f"{m['roundup_cents'] / 100:.2f}",
                     ])
+        elif venue["tip_model"] == "POINTS_HOURS":
+            # Points are the audit trail for the split: tips / points is the
+            # value of one point, so any row can be checked by hand. Event
+            # money is its own column — it comes from a different pool.
+            w.writerow(["Employee", "Tips (daily pool)", "Event Payout",
+                        "Tips Total", "Auto Gratuity (wages)",
+                        "Days Worked", "Hours", "Points"])
+            for e in s["employees"]:
+                tips_total = e["tips_cents"] + e.get("event_cents", 0)
+                w.writerow([
+                    e["name"],
+                    f"{e['tips_cents'] / 100:.2f}",
+                    f"{e.get('event_cents', 0) / 100:.2f}",
+                    f"{tips_total / 100:.2f}",
+                    f"{e['gratuity_cents'] / 100:.2f}",
+                    e["days"],
+                    f"{e['hours']:.2f}",
+                    f"{e['points']:.4f}".rstrip("0").rstrip("."),
+                ])
         else:
             # "FOH Hours" stays hours actually worked (what payroll needs);
             # "Credited Hours" is the tip-weighted figure the split used, so a

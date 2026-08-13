@@ -17,6 +17,9 @@ FRIDAY = 4  # date.weekday(): Mon=0 .. Fri=4
 VENUE_SCHEMES = {
     "POOL_HOURS": ("semimonthly",),
     "PERCENT_TIPOUT": ("weekly", "monthly"),
+    # Poquitos policy: "tips are calculated daily and distributed through
+    # semi-monthly payroll" — same periods as Tavern Law, no cash payout run.
+    "POINTS_HOURS": ("semimonthly",),
 }
 
 

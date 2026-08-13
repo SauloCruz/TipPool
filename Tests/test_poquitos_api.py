@@ -238,3 +238,67 @@ class TestEventStaffWithoutEventMoney:
             "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 6}],
         }).json()["computed"]
         assert out["flags"]["event_staff_without_event_money"] is False
+
+
+class TestPeriodAndExport:
+    """Semi-monthly period rollup and the payroll CSV. Points are carried
+    through because they are the audit trail: tips / points is what one point
+    was worth, so any row can be re-derived by hand."""
+
+    P_DAY = "2026-08-20"
+
+    def _finalize_a_day(self, client, poq, staff):
+        r = client.put(f"/api/days/{self.P_DAY}", headers=poq["h"], json={
+            "credit_tips_cents": 100000, "auto_gratuity_cents": 20000,
+            "event_service_charge_cents": 100000,
+            "shifts": [
+                {"employee_id": staff["Ana"], "role": "BARTENDER", "hours": 8},
+                {"employee_id": staff["Ben"], "role": "SERVER", "hours": 8},
+                {"employee_id": staff["Dee"], "role": "BUSSER", "hours": 6},
+                {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 8},
+            ]})
+        assert r.status_code == 200, r.text
+        assert client.post(f"/api/days/{self.P_DAY}/finalize",
+                           headers=poq["h"]).status_code == 200
+
+    def test_period_totals_use_the_eighty_twenty_shape(self, client, poq, staff):
+        self._finalize_a_day(client, poq, staff)
+        p = client.get(f"/api/periods/{self.P_DAY}/export", headers=poq["h"]).json()
+        assert p["model"] == "POINTS_HOURS"
+        assert p["totals"]["foh_pool_cents"] == 80000
+        assert p["totals"]["boh_pool_cents"] == 20000
+        assert p["totals"]["auto_gratuity_cents"] == 20000
+        # semi-monthly, like Tavern Law
+        assert (p["start"], p["end"]) == ("2026-08-16", "2026-08-31")
+
+    def test_period_carries_hours_points_and_event_money(self, client, poq, staff):
+        p = client.get(f"/api/periods/{self.P_DAY}/export", headers=poq["h"]).json()
+        rows = {e["name"]: e for e in p["employees"]}
+        assert rows["Ana"]["points"] == 10.0 and rows["Ana"]["hours"] == 8.0
+        assert rows["Dee"]["event_cents"] > 0          # support tip-out
+        assert all(e["days"] == 1 for e in p["employees"])
+
+    def test_csv_columns_and_a_hand_checkable_row(self, client, poq, staff):
+        r = client.get(f"/api/periods/{self.P_DAY}/export.csv", headers=poq["h"])
+        assert r.status_code == 200
+        lines = r.text.strip().splitlines()
+        cols = lines[0].split(",")
+        assert cols == ["Employee", "Tips (daily pool)", "Event Payout",
+                        "Tips Total", "Auto Gratuity (wages)", "Days Worked",
+                        "Hours", "Points"]
+        rows = {l.split(",")[0]: l.split(",") for l in lines[1:]}
+        ana = rows["Ana"]
+        tips, points = float(ana[1]), float(ana[7])
+        # FOH pool $800 over 21 points (Ana 10 + Ben 8 + Dee 3) = $38.095/pt
+        assert points == 10.0
+        assert abs(tips - 380.95) < 0.01
+        # the published points make the rate checkable by hand for everyone
+        rate = tips / points
+        assert abs(float(rows["Ben"][1]) - rate * float(rows["Ben"][7])) < 0.01
+        assert abs(float(rows["Dee"][1]) - rate * float(rows["Dee"][7])) < 0.01
+        # tips total = daily + event
+        assert abs(float(ana[3]) - (tips + float(ana[2]))) < 0.01
+
+    def test_filename_is_venue_scoped(self, client, poq, staff):
+        r = client.get(f"/api/periods/{self.P_DAY}/export.csv", headers=poq["h"])
+        assert 'filename="tips_poquitos_' in r.headers["content-disposition"]
