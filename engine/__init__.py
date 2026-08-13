@@ -5,7 +5,8 @@ handled in integer cents; hours as exact fractions. See CLAUDE.md §2 for the
 business rules this module implements.
 """
 
-__version__ = "1.2.0"  # 1.2: POOL_HOURS role weights live (door/host half credit)
+__version__ = "1.3.0"  # 1.3: adds POINTS_HOURS (Poquitos)
+# 1.2: POOL_HOURS role weights live (door/host half credit)
 # 1.1: adds PERCENT_TIPOUT (La Fontana); POOL_HOURS unchanged
 
 from .core import (
@@ -25,6 +26,16 @@ from .clipping import (
     round_hours_up,
 )
 from .payments import Payment, net_credit_tip_cents
+from .points_hours import (
+    DEFAULT_MANAGER_POOL_ROLES,
+    DEFAULT_POQ_FOH_PCT,
+    DEFAULT_ROLE_POINTS,
+    DEFAULT_ROLE_SIDE,
+    PointsDayResult,
+    Shift,
+    UnknownRoleError,
+    compute_day_points_hours,
+)
 from .percent_tipout import (
     DEFAULT_PERCENTAGES,
     LFDayResult,
@@ -47,6 +58,14 @@ __all__ = [
     "round_hours_up",
     "Payment",
     "net_credit_tip_cents",
+    "DEFAULT_MANAGER_POOL_ROLES",
+    "DEFAULT_POQ_FOH_PCT",
+    "DEFAULT_ROLE_POINTS",
+    "DEFAULT_ROLE_SIDE",
+    "PointsDayResult",
+    "Shift",
+    "UnknownRoleError",
+    "compute_day_points_hours",
     "DEFAULT_PERCENTAGES",
     "LFDayResult",
     "compute_day_percent_tipout",
