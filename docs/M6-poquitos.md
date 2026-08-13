@@ -84,32 +84,42 @@ Policy text, for reference:
 > the private event choose to leave an additional tip at the end of the event,
 > this tip will be divided equally amongst the staff working the event.
 
-Understood so far:
+### Settled (owner, 2026-08-03)
 
-- An event is its own pool: event service charge + event tips, split **80/20**
-  between (servers + bartenders who worked the event) and the kitchen.
-- Support staff (busser, expo/food runner, host) take **3% each** out of the
-  FOH portion, and **stay in the daily pool** as well.
-- Service staff who worked the event are **only** in the event pool — their
-  hours come out of that day's daily pool.
-- An extra host gratuity at the end is split **equally** (not by points) among
-  everyone who worked the event.
-- Separate 3% administrative fee → the manager who organized the event.
-- Take-out catering carries its own 20% service charge → Chef and Manager.
+| Rule | Ruling |
+|---|---|
+| Support tip-out base | **3% of the FOH portion, per ROLE** — one busser share, one expo/food-runner share, one host share = 9% of the FOH portion in total. Each role's 3% is then divided among the people in that role (NOT 3% per person). |
+| Who is in the event pool vs the daily pool | **The clock-in role decides.** Poquitos has separate event roles in Square; anyone clocked in under an event service role is in the event pool and **out of the daily pool** for those hours. No manual marking — the same `wage.title` mechanism that drives daily points. |
 
-**Open questions blocking the event build** (each moves real money):
+Structure now settled:
 
-1. The 3% support tip-out — 3% *of the FOH portion*, or 3% of event sales /
-   the event gross? And is it 3% per role (one busser share split among the
-   bussers who worked) or 3% per person?
-2. How is the kitchen's 20% of an event split — by hours worked that day,
-   evenly per head, or among a named event crew?
-3. "Service staff only in the event pool" — are they out of the daily pool for
-   the *whole* day, or only for the hours worked at the event?
-4. Take-out catering 20% → "Chef and Manager": what split between the two?
-5. Is the 3% admin fee taken off the top before the 80/20, or additional to it?
+```
+event_pool   = event_service_charge (20%) + event_tips
+foh_portion  = 80% of event_pool
+boh_portion  = event_pool - foh_portion          # exact remainder
+
+busser_share = 3% of foh_portion   -> divided among bussers
+expo_share   = 3% of foh_portion   -> divided among expo / food runners
+host_share   = 3% of foh_portion   -> divided among hosts
+service_pool = foh_portion - 9%    -> event servers & bartenders
+```
+
+### Still OPEN — do not invent these
+
+1. **Who receives each 3% support share?** The support roles stay in the daily
+   pool, so they are not clocked in under an event role. Is the share divided
+   among the support staff who *worked the event* (identified how — an event
+   support role too?), or among everyone in that role who worked that day?
+2. **How is `service_pool` divided among the event servers and bartenders?**
+   Points x hours as in the daily pool (bartender 1.25 / server 1.0), plain
+   hours, or evenly per head?
+3. **How is `boh_portion` divided?** By kitchen hours worked that day, evenly
+   per head, or among a named event crew?
+4. **The 3% administrative fee** — taken off the top of the event pool before
+   the 80/20, or charged in addition (so it never touches the staff pool)?
+5. Take-out catering 20% service charge -> "Chef and Manager": what split?
 6. Special events (Cinco de Mayo, Block Party) — same mechanics as a private
-   event, or simply "everyone who worked shares the event tips"?
+   event, or simply "everyone who worked shares the event tips equally"?
 
 ---
 
