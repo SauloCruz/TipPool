@@ -243,10 +243,20 @@ cent — so the calculation is not in question; only configuration was.
 
 | Difference | Effect on 2026-08-05 | Status |
 |---|---|---|
-| Hours rounded up to 0.05 vs exact | +0.26 h, shares shift | **FIXED** — Poquitos now uses 2dp nearest |
-| Auto-gratuity pooled vs separate | $158.60 | open — see below |
-| Processing fee charged on gratuity too | $3.49 | open — follows from the above |
-| Bar Prep points: TipHaus 1.0 vs policy 0.5 | none yet (nobody worked it) | open |
+| Hours rounded up to 0.05 vs exact | +0.26 h, shares shift | **FIXED** — Poquitos uses 2dp nearest |
+| Processing fee not charged on gratuity | $3.49 | **FIXED** — fee now covers card tips + gratuity; only cash exempt |
+| Bar Prep points: TipHaus 1.0 vs policy 0.5 | none yet (nobody worked it) | **CLOSED** — owner corrected TipHaus to 0.5 |
+| Auto-gratuity pooled vs reported separately | $0 | moot — see below |
+
+**RECONCILED.** 2026-08-05 now matches TipHaus at **$1,052.42**, with the
+largest per-person difference $0.08 (their display rounds hours to 2dp).
+
+Note the gratuity-pooling question turned out not to matter for anyone's pay:
+we distribute the gratuity by the same 80/20 and the same points as the tips,
+so pooling it or reporting it on its own line produces identical take-home.
+It stays a separate payroll line here because service charges are wages, not
+tips — a real distinction for tax, and the reason the day screen shows Tips,
+Grat and Total as three figures.
 
 After the hours fix, our day total is **$1,055.91** against TipHaus's
 **$1,052.42** — a gap of exactly **$3.49 = 2.2% of the $158.60 gratuity**,

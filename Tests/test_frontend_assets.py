@@ -177,8 +177,11 @@ class TestPoquitosDayScreen:
         assert "showPicker" in self.SCREEN
 
     def test_card_fee_is_spelled_out_not_silent(self):
-        assert "processing fee" in self.SCREEN
-        assert "Cash tips are not reduced" in self.SCREEN
+        """Both fee lines must be visible — a deduction that moves real money
+        should never appear only as a smaller pool."""
+        assert "Processing fee" in self.SCREEN
+        assert "card tips" in self.SCREEN and "gratuity" in self.SCREEN
+        assert "Cash tips are exempt" in self.SCREEN
 
     def test_role_and_points_shown_per_shift(self):
         assert "rolechip" in self.SCREEN

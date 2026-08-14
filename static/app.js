@@ -1518,12 +1518,13 @@ async function renderDayPoq(dateArg) {
     }
     const t = computed?.totals || {};
     feeBox.textContent = "";
-    if (t.card_fee_cents) {
+    if (t.processing_fee_total_cents) {
+      const pct = computed.card_fee_pct;
       feeBox.append(el("div", { class: "hint", style: "margin:2px 2px 8px" },
-        `Card tips ${fmt(t.credit_tips_gross_cents)} − processing fee `
-        + `${fmt(t.card_fee_cents)} (${computed.card_fee_pct}%) = `
-        + `${fmt(t.credit_tips_gross_cents - t.card_fee_cents)} pooled. `
-        + "Cash tips are not reduced."));
+        `Processing fee ${pct}% on everything the card handled: `
+        + `card tips ${fmt(t.credit_tips_gross_cents)} − ${fmt(t.card_fee_cents)}, `
+        + `gratuity ${fmt(t.auto_gratuity_gross_cents)} − ${fmt(t.gratuity_fee_cents)} `
+        + `(${fmt(t.processing_fee_total_cents)} total). Cash tips are exempt.`));
     }
     poolsBox.textContent = "";
     for (const [v, k] of [[t.total_tips_cents, "Pooled tips"],

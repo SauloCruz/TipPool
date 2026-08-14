@@ -470,14 +470,37 @@ class TestCardProcessingFee:
         assert (out.credit_tips_gross_cents - out.card_fee_cents
                 + to_cents(11.11)) == out.total_tips_cents
 
-    def test_gratuity_is_not_reduced_by_the_tip_fee(self):
-        """Service charges are a separate pool on a separate payroll line;
-        the tip fee setting must not silently shrink them."""
+    def test_gratuity_bears_the_fee_too(self):
+        """Owner 2026-08-14: the fee follows the card, so the auto-gratuity is
+        reduced by it as well — only cash is exempt. Gratuity stays its own
+        pool on its own payroll line; it is just distributed NET."""
         out = compute_day_points_hours(
             credit_tips=1000, auto_gratuity=200, card_fee_pct=Decimal("5"),
             shifts=[Shift("A", "SERVER", 8), Shift("C", "LINE_COOK", 8)])
-        assert out.auto_gratuity_cents == 20000
-        assert sum(out.gratuity_payout_cents.values()) == 20000
+        assert out.auto_gratuity_gross_cents == 20000
+        assert out.gratuity_fee_cents == 1000          # 5% of 200.00
+        assert out.auto_gratuity_cents == 19000        # what gets distributed
+        assert sum(out.gratuity_payout_cents.values()) == 19000
+
+    def test_only_cash_escapes_the_fee(self):
+        """The one exemption: no processor ever touched the cash."""
+        out = compute_day_points_hours(
+            credit_tips=100, cash_tips=100, auto_gratuity=100,
+            card_fee_pct=Decimal("10"),
+            shifts=[Shift("A", "SERVER", 8), Shift("C", "LINE_COOK", 8)])
+        assert out.card_fee_cents == 1000              # 10% of the card tips
+        assert out.gratuity_fee_cents == 1000          # 10% of the gratuity
+        # pooled = (100 - 10) card + 100 cash, untouched
+        assert out.total_tips_cents == 19000
+
+    def test_reproduces_the_venues_other_system(self):
+        """2026-08-05 reconciled against TipHaus to the cent (M6 doc, s4)."""
+        out = compute_day_points_hours(
+            credit_tips=Decimal("889.57"), cash_tips=Decimal("27.31"),
+            auto_gratuity=Decimal("158.60"), card_fee_pct=Decimal("2.2"),
+            shifts=[Shift("A", "SERVER", 8), Shift("C", "LINE_COOK", 8)])
+        assert out.card_fee_cents + out.gratuity_fee_cents == 2306
+        assert out.total_tips_cents + out.auto_gratuity_cents == 105242
 
     def test_fractional_rate_rounds_once_to_the_cent(self):
         out = compute_day_points_hours(

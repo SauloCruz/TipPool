@@ -31,9 +31,10 @@ from .core import ManagerInPoolError, _as_fraction, _cents, distribute_cents, to
 # Poquitos policy: 80% of pooled tips to FOH, the remainder to BOH.
 DEFAULT_POQ_FOH_PCT = Decimal("80")
 
-# Card processing fee withheld from CREDIT tips before pooling (owner
-# 2026-08-13). Default 0 = no deduction: a rate must be set deliberately in
-# Setup, never assumed. Cash tips are untouched — no processor handles them.
+# Card processing fee withheld from everything the card processor handled —
+# credit tips AND the auto-gratuity — before either is distributed (owner
+# 2026-08-13, extended to gratuity 2026-08-14). Only CASH is exempt, since no
+# processor touches it. Default 0: a rate must be set deliberately in Setup.
 DEFAULT_CARD_FEE_PCT = Decimal("0")
 
 # Points per hour worked, by role (policy "1:1" and ".5:1" tables).
@@ -140,11 +141,16 @@ class PointsDayResult:
     side: dict[str, str] = field(default_factory=dict)
     foh_points_total: float = 0.0
     boh_points_total: float = 0.0
-    # card tips before the processor's fee, and the fee withheld from them
+    # gross amounts before the processor's fee, and the fee taken from each.
+    # `auto_gratuity` above is the NET actually distributed.
     credit_tips_gross: float = 0.0
     card_fee: float = 0.0
     credit_tips_gross_cents: int = 0
     card_fee_cents: int = 0
+    auto_gratuity_gross: float = 0.0
+    gratuity_fee: float = 0.0
+    auto_gratuity_gross_cents: int = 0
+    gratuity_fee_cents: int = 0
 
 
 def _side_weights(shifts, role_points, role_side, want_side):
@@ -208,16 +214,19 @@ def compute_day_points_hours(
 
     credit_gross_cents = to_cents(credit_tips)
     cash_cents = to_cents(cash_tips)
-    gratuity_cents = to_cents(auto_gratuity)
+    gratuity_gross_cents = to_cents(auto_gratuity)
 
-    # The card processor's fee comes off CREDIT tips before anything is
-    # pooled, so every downstream share is of money the venue actually
-    # received. Cash is untouched. Rounded once, to the cent.
+    # The processor's fee comes off everything it handled — card tips and the
+    # auto-gratuity alike — before either is distributed, so every share is of
+    # money the venue actually received. CASH is exempt: no processor touched
+    # it. Each pool bears its own share of the fee, rounded once to the cent.
     fee_rate = _as_fraction(card_fee_pct) / 100
     if not 0 <= fee_rate < 1:
         raise ValueError("card_fee_pct must be at least 0 and under 100")
     card_fee_cents = int((credit_gross_cents * fee_rate + Fraction(1, 2)).__floor__())
+    gratuity_fee_cents = int((gratuity_gross_cents * fee_rate + Fraction(1, 2)).__floor__())
     credit_cents = credit_gross_cents - card_fee_cents
+    gratuity_cents = gratuity_gross_cents - gratuity_fee_cents
     total_cents = credit_cents + cash_cents
 
     # Split once, exactly: BOH takes the remainder so the two pools always
@@ -284,6 +293,10 @@ def compute_day_points_hours(
         card_fee=_cents(card_fee_cents),
         credit_tips_gross_cents=credit_gross_cents,
         card_fee_cents=card_fee_cents,
+        auto_gratuity_gross=_cents(gratuity_gross_cents),
+        gratuity_fee=_cents(gratuity_fee_cents),
+        auto_gratuity_gross_cents=gratuity_gross_cents,
+        gratuity_fee_cents=gratuity_fee_cents,
         total_tips=_cents(total_cents),
         foh_pool=_cents(foh_cents),
         boh_pool=_cents(boh_cents),
