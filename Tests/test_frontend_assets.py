@@ -189,3 +189,30 @@ class TestPoquitosDayScreen:
 
     def test_blocking_issue_stops_finalize(self):
         assert "Blocked — fix mappings in Setup" in self.SCREEN
+
+
+class TestPeriodScreenPerModel:
+    """Each tip model names its pools differently. The period screen must
+    branch on the model — POINTS_HOURS has no `boh_allocation_cents`, so
+    falling through to the hourly-pool labels showed its kitchen share as
+    $0.00 and its per-employee tips as NaN (2026-08-14 regression)."""
+
+    TILES = APP_JS.split("function poolTiles(")[1].split("\n}")[0]
+
+    def test_points_hours_reads_its_own_kitchen_key(self):
+        assert 'model === "POINTS_HOURS"' in self.TILES
+        assert "t.boh_pool_cents" in self.TILES
+
+    def test_each_model_has_its_own_tile_row(self):
+        for token in ("PERCENT_TIPOUT", "POINTS_HOURS",
+                      "t.pool_boh_cents", "t.boh_allocation_cents"):
+            assert token in self.TILES, token
+
+    def test_period_staff_table_branches_on_points_hours(self):
+        period = APP_JS.split("async function renderPeriod(")[1].split(
+            "\nasync function ")[0]
+        assert 'p.model === "POINTS_HOURS"' in period
+        # the hourly-pool sum must not be applied to a model that lacks the key
+        poq = period.split('p.model === "POINTS_HOURS"')[1].split("} else {")[0]
+        assert "s.boh_cents" not in poq
+        assert "s.tips_cents + s.gratuity_cents" in poq   # a real take-home total

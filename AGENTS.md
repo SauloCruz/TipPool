@@ -81,7 +81,7 @@ with:
   built too (compute_event_points_hours); three minor event rules remain open in
   that doc — do not invent them.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **420 tests**.
+  **423 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.

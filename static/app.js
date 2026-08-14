@@ -1644,10 +1644,16 @@ async function renderDayPoq(dateArg) {
 
 
 function poolTiles(t, model) {
+  // Each tip model names its pools differently — POINTS_HOURS has no
+  // boh_allocation_cents (its kitchen slice is boh_pool_cents), so it needs
+  // its own row rather than falling through to the hourly-pool labels.
   const spec = model === "PERCENT_TIPOUT"
     ? [[t.total_tips_cents, "Total tips"], [t.pool_busser_cents, "Busser pool"],
        [t.pool_host_cents, "Host pool"], [t.pool_boh_cents, "Kitchen (monthly)"],
        [t.auto_gratuity_cents, "Auto-gratuity"]]
+    : model === "POINTS_HOURS"
+    ? [[t.total_tips_cents, "Total tips"], [t.foh_pool_cents, "FOH 80%"],
+       [t.boh_pool_cents, "Kitchen 20%"], [t.auto_gratuity_cents, "Auto-gratuity"]]
     : [[t.total_tips_cents, "Total tips"], [t.boh_allocation_cents, "Kitchen share"],
        [t.foh_pool_cents, "FOH pool"], [t.auto_gratuity_cents, "Auto-gratuity"]];
   return el("div", { class: "pools" },
@@ -1723,6 +1729,27 @@ async function renderPeriod(anchorArg) {
           el("td", { class: "num" }, fmt(s.pool_share_cents + s.returned_cents)),
           el("td", { class: "num" }, fmt(s.tips_cents)),
           el("td", { class: "num" }, fmt(s.gratuity_cents)))))));
+    } else if (p.model === "POINTS_HOURS") {
+      // POINTS_HOURS has one tips figure per person (no separate BOH share)
+      // plus event money, and Total is what they actually take home.
+      const anyEvent = p.employees.some((s) => s.event_cents);
+      empCard.append(el("table", {},
+        el("thead", {}, el("tr", {},
+          el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
+          el("th", { class: "num" }, "Grat"),
+          ...(anyEvent ? [el("th", { class: "num" }, "Event")] : []),
+          el("th", { class: "num" }, "Total"),
+          el("th", { class: "num" }, "Days"), el("th", { class: "num" }, "Hrs"))),
+        el("tbody", {}, p.employees.map((s) => el("tr", {},
+          el("td", {}, esc(s.name)),
+          el("td", { class: "num" }, fmt(s.tips_cents)),
+          el("td", { class: "num" }, fmt(s.gratuity_cents)),
+          ...(anyEvent ? [el("td", { class: "num" },
+            s.event_cents ? fmt(s.event_cents) : "—")] : []),
+          el("td", { class: "num" },
+            fmt(s.tips_cents + s.gratuity_cents + (s.event_cents || 0))),
+          el("td", { class: "num" }, s.days),
+          el("td", { class: "num" }, s.hours ? s.hours.toFixed(2) : "—"))))));
     } else {
       empCard.append(el("table", {},
         el("thead", {}, el("tr", {},
