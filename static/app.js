@@ -1554,17 +1554,37 @@ async function renderDayPoq(dateArg) {
 
     tableBox.textContent = "";
     const people = computed?.people || [];
+    // Tips, gratuity and event money are three separate pools, but what a
+    // person actually takes home is the sum — and that is the figure to
+    // compare against another system's single "take home" number.
+    const anyEvent = people.some((p) => p.event_cents);
+    const take = (p) => p.tips_cents + p.gratuity_cents + (p.event_cents || 0);
     tableBox.append(el("div", { class: "prow phead" },
       el("span", { class: "cname" }, "Name"), el("span", { class: "chrs" }, "Pts"),
-      el("span", { class: "ctips" }, "Tips"), el("span", { class: "cgrat" }, "Event")));
+      el("span", { class: "ctips" }, "Tips"), el("span", { class: "cgrat" }, "Grat"),
+      ...(anyEvent ? [el("span", { class: "cgrat" }, "Event")] : []),
+      el("span", { class: "ctake" }, "Total")));
     for (const p of people) {
       tableBox.append(el("div", { class: "prow" },
         el("span", { class: "cname" }, esc(p.name)),
         el("span", { class: "chrs" }, String(p.points ?? 0)),
         el("span", { class: "ctips" }, fmt(p.tips_cents)),
-        el("span", { class: "cgrat" }, p.event_cents ? fmt(p.event_cents) : "—")));
+        el("span", { class: "cgrat" }, p.gratuity_cents ? fmt(p.gratuity_cents) : "—"),
+        ...(anyEvent ? [el("span", { class: "cgrat" },
+          p.event_cents ? fmt(p.event_cents) : "—")] : []),
+        el("span", { class: "ctake" }, fmt(take(p)))));
     }
-    if (!people.length) {
+    if (people.length) {
+      const sum = (f) => people.reduce((a, p) => a + f(p), 0);
+      tableBox.append(el("div", { class: "prow ptotal" },
+        el("span", { class: "cname" }, "Total"),
+        el("span", { class: "chrs" }, ""),
+        el("span", { class: "ctips" }, fmt(sum((p) => p.tips_cents))),
+        el("span", { class: "cgrat" }, fmt(sum((p) => p.gratuity_cents))),
+        ...(anyEvent ? [el("span", { class: "cgrat" },
+          fmt(sum((p) => p.event_cents || 0)))] : []),
+        el("span", { class: "ctake" }, fmt(sum(take)))));
+    } else {
       tableBox.append(el("div", { class: "note" }, "Nothing to distribute yet."));
     }
     drawShifts();

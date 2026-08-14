@@ -55,6 +55,7 @@ guess a point value.
 | Cash tips | Σ `declared_cash_tip_money` across the day's timecards, pulled from Square, manual override allowed — identical to Tavern Law. |
 | Private / special events | **Build them** (not deferred). See §2 — specifics still needed. |
 | Card processing fee (2026-08-13) | Withheld from **credit tips only**, before pooling — so every share is of money the venue actually received. Cash tips and auto-gratuity untouched. Setup input `poq_card_fee_pct`, default `0` (never assumed); the rate used is recorded on each snapshot. |
+| Hours (2026-08-14) | As Square reports them: **2 decimals, nearest**. NOT the Tavern Law round-up-to-0.05 rule — that inflated hours ~0.26 h/day and was the main source of drift from the venue's TipHaus figures. |
 | Pay periods | Semi-monthly (1st–15th, 16th–EOM), same as TL. Tips are paid through payroll only — no cash payout run (unlike La Fontana). |
 
 ### Flags (non-blocking, surfaced for review)
@@ -229,3 +230,35 @@ own column — it comes from a different pool than the daily 80/20.
 Per-venue Square credentials, venue scoping, semi-monthly periods, RBAC, the
 audit log and snapshot immutability all already exist from M3/M5 and need no
 new work for this venue.
+
+
+---
+
+## 4. Reconciliation against TipHaus (2026-08-14)
+
+The venue also runs TipHaus, so Aug 5 2026 was compared line by line. Running
+**our** engine with TipHaus's settings reproduced their per-person figures to
+within $0.08 (their display rounds hours to 2dp) and their day total to the
+cent — so the calculation is not in question; only configuration was.
+
+| Difference | Effect on 2026-08-05 | Status |
+|---|---|---|
+| Hours rounded up to 0.05 vs exact | +0.26 h, shares shift | **FIXED** — Poquitos now uses 2dp nearest |
+| Auto-gratuity pooled vs separate | $158.60 | open — see below |
+| Processing fee charged on gratuity too | $3.49 | open — follows from the above |
+| Bar Prep points: TipHaus 1.0 vs policy 0.5 | none yet (nobody worked it) | open |
+
+After the hours fix, our day total is **$1,055.91** against TipHaus's
+**$1,052.42** — a gap of exactly **$3.49 = 2.2% of the $158.60 gratuity**,
+which TipHaus charges the processing fee against and we do not.
+
+TipHaus's FOH pool lists Tip Sources as *Credit Card Tip, Gratuity Service
+Charge, Gift Card Tip*, i.e. it pools the service charge with tips. The
+Poquitos policy document agrees ("100% of tips, whether from credit cards,
+cash, or gratuities, are pooled together"). The owner's 2026-08-03 ruling to
+this project said the opposite (keep it separate, as at Tavern Law), so the
+two are in conflict and the owner has not yet resolved it. **Do not change the
+gratuity treatment without an explicit ruling.**
+
+(Gift-card tips were checked: across 1,227 tipped payments in a three-week
+window every one was a plain CARD, so nothing is being missed there.)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from engine import business_day_bounds
@@ -216,7 +217,9 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
     grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"])
     labor = extract_timecards_poq(
         timecards, emp_by_tmid, venue["timezone"],
-        settings_store.rounding_increment(settings),
+        # unused by this extractor: Poquitos keeps hours as Square reports
+        # them (2dp, nearest) rather than rounding to an increment
+        Decimal("0"),
         settings_store.poq_job_roles(settings),
     )
 

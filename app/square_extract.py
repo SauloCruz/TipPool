@@ -12,7 +12,7 @@ Issues come in two severities:
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 from engine import Break, TippableWindow, clip_timecard, round_hours_up
@@ -447,6 +447,9 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
 def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
                           tzname: str, increment: Decimal,
                           job_roles: dict[str, str]) -> dict:
+    # NOTE `increment` is accepted for signature parity with the other
+    # extractors but deliberately unused: Poquitos does not round hours to an
+    # increment (owner 2026-08-14). See the quantize below.
     """Turn a day's timecards into POINTS_HOURS shifts.
 
     Role is read from each timecard's Square job (`wage.title`) — the job the
@@ -509,7 +512,11 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
                 continue
             b0, b1 = _iso(b["start_at"]).timestamp(), _iso(b["end_at"]).timestamp()
             seconds -= max(0.0, min(b1, t_out.timestamp()) - max(b0, t_in.timestamp()))
-        hours = round_hours_up(Decimal(round(seconds)) / 3600, increment)
+        # Poquitos: hours as Square reports them, to the hundredth of an hour
+        # (owner 2026-08-14). Nearest, NOT the round-up-to-0.05 rule Tavern
+        # Law uses — that is what made these figures drift from TipHaus.
+        hours = (Decimal(round(seconds)) / 3600).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP)
         shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
                        "role": role, "job_title": title, "hours": float(hours)})
 

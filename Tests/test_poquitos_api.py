@@ -357,3 +357,33 @@ class TestCardFeeSetting:
             r = client.put("/api/settings", headers=poq["h"],
                            json={"poq_card_fee_pct": bad})
             assert r.status_code == 422, bad
+
+
+class TestPoquitosHoursAreNotRoundedUp:
+    """Owner 2026-08-14: Poquitos keeps hours as Square reports them (2dp,
+    nearest) instead of Tavern Law's round-up-to-0.05. Rounding up was what
+    made these figures drift from the venue's existing TipHaus numbers."""
+
+    def test_hours_match_square_to_the_hundredth(self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        fake.payments = []
+        fake.timecards = [
+            # 3h22m = 3.3667 -> 3.37 (round-up-to-0.05 would give 3.40)
+            {"team_member_id": "TM_ANA", "start_at": "2026-08-25T18:00:00-07:00",
+             "end_at": "2026-08-25T21:22:00-07:00", "wage": {"title": "Shift Lead"},
+             "declared_cash_tip_money": money(0)},
+            # 10h43m = 10.7167 -> 10.72 (round-up would give 10.75)
+            {"team_member_id": "TM_BEN", "start_at": "2026-08-25T15:00:00-07:00",
+             "end_at": "2026-08-26T01:43:00-07:00", "wage": {"title": "Bartender"},
+             "declared_cash_tip_money": money(0)},
+        ]
+        r = client.post("/api/days/2026-08-25/pull", headers=poq["h"])
+        assert r.status_code == 200, r.text
+        hours = sorted(s["hours"] for s in r.json()["inputs"]["shifts"])
+        assert hours == [3.37, 10.72]
+
+    def test_tavern_law_still_rounds_up(self):
+        """The two venues must not share a rule — TL's ruling stands."""
+        from decimal import Decimal
+        from engine import round_hours_up
+        assert round_hours_up(Decimal("3.3667"), Decimal("0.05")) == Decimal("3.40")
