@@ -54,6 +54,7 @@ guess a point value.
 | Bar Manager working a Bartender shift | **The timecard's job decides.** A pool-excluded person earns normally on a shift whose role is in `manager_pool_roles` (default `BARTENDER`); any other manager shift still raises `ManagerInPoolError`. Narrow, configurable allowlist — the hard block stays on for everything else. |
 | Cash tips | Σ `declared_cash_tip_money` across the day's timecards, pulled from Square, manual override allowed — identical to Tavern Law. |
 | Private / special events | **Build them** (not deferred). See §2 — specifics still needed. |
+| Card processing fee (2026-08-13) | Withheld from **credit tips only**, before pooling — so every share is of money the venue actually received. Cash tips and auto-gratuity untouched. Setup input `poq_card_fee_pct`, default `0` (never assumed); the rate used is recorded on each snapshot. |
 | Pay periods | Semi-monthly (1st–15th, 16th–EOM), same as TL. Tips are paid through payroll only — no cash payout run (unlike La Fontana). |
 
 ### Flags (non-blocking, surfaced for review)

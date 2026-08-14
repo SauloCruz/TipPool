@@ -174,6 +174,22 @@ class SettingsPatch(BaseModel):
     lf_no_host_min_bussers: int | None = Field(default=None, ge=0, le=20)
     # POOL_HOURS: tip credit per hour for a host/door shift ("0.5" = half, "1" = off)
     tl_door_weight: str | None = None
+    # POINTS_HOURS: card processing fee withheld from credit tips before pooling
+    poq_card_fee_pct: str | None = None
+    poq_foh_pct: str | None = None
+
+    @field_validator("poq_card_fee_pct", "poq_foh_pct")
+    @classmethod
+    def _pct_valid(cls, v):
+        if v is None:
+            return v
+        try:
+            pct = Fraction(str(v))
+        except (ValueError, ZeroDivisionError):
+            raise ValueError("must be a number like 3 or 2.75")
+        if not 0 <= pct <= 100:
+            raise ValueError("must be between 0 and 100")
+        return str(v)
 
     @field_validator("tl_door_weight")
     @classmethod
@@ -442,6 +458,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return compute_poq_outputs(
                     inputs, emps, st["poq_roles"], st["poq_job_roles"],
                     st["poq_foh_pct"], st["poq_support_pct"],
+                    st["poq_card_fee_pct"],
                 )
             return compute_outputs(
                 inputs, emps,

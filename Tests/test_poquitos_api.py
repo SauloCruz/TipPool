@@ -302,3 +302,58 @@ class TestPeriodAndExport:
     def test_filename_is_venue_scoped(self, client, poq, staff):
         r = client.get(f"/api/periods/{self.P_DAY}/export.csv", headers=poq["h"])
         assert 'filename="tips_poquitos_' in r.headers["content-disposition"]
+
+
+class TestCardFeeSetting:
+    """The processing fee is a Setup input (owner 2026-08-13): it must be
+    editable, must reduce only credit tips, and the rate used must be stored
+    on the snapshot so a finalized day explains itself."""
+
+    FEE_DAY = "2026-08-21"
+
+    def test_default_is_zero_so_nothing_changes_silently(self, client, poq):
+        s = client.get("/api/settings", headers=poq["h"]).json()
+        assert s["poq_card_fee_pct"] == "0"
+
+    def test_setting_the_rate_changes_the_pool(self, client, poq, staff):
+        body = {"credit_tips_cents": 100000, "cash_tips_cents": 10000,
+                "shifts": [
+                    {"employee_id": staff["Ben"], "role": "SERVER", "hours": 8},
+                    {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 8}]}
+        before = client.put(f"/api/days/{self.FEE_DAY}", headers=poq["h"],
+                            json=body).json()["computed"]
+        assert before["totals"]["total_tips_cents"] == 110000
+        try:
+            assert client.put("/api/settings", headers=poq["h"],
+                              json={"poq_card_fee_pct": "3"}).status_code == 200
+            after = client.put(f"/api/days/{self.FEE_DAY}", headers=poq["h"],
+                               json=body).json()["computed"]
+            t = after["totals"]
+            assert t["credit_tips_gross_cents"] == 100000
+            assert t["card_fee_cents"] == 3000        # card tips only
+            assert t["total_tips_cents"] == 107000    # cash untouched
+            assert after["card_fee_pct"] == "3"
+            assert sum(p["tips_cents"] for p in after["people"]) == 107000
+        finally:
+            client.put("/api/settings", headers=poq["h"],
+                       json={"poq_card_fee_pct": "0"})
+
+    def test_finalized_day_keeps_the_rate_it_was_locked_with(self, client, poq, staff):
+        client.put("/api/settings", headers=poq["h"], json={"poq_card_fee_pct": "5"})
+        client.put("/api/days/2026-08-22", headers=poq["h"], json={
+            "credit_tips_cents": 100000,
+            "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 8}]})
+        assert client.post("/api/days/2026-08-22/finalize",
+                           headers=poq["h"]).status_code == 200
+        # change the rate afterwards — the snapshot must not move
+        client.put("/api/settings", headers=poq["h"], json={"poq_card_fee_pct": "0"})
+        out = client.get("/api/days/2026-08-22", headers=poq["h"]).json()["computed"]
+        assert out["card_fee_pct"] == "5"
+        assert out["totals"]["card_fee_cents"] == 5000
+        assert out["totals"]["total_tips_cents"] == 95000
+
+    def test_bad_rates_rejected(self, client, poq):
+        for bad in ("-1", "120", "abc"):
+            r = client.put("/api/settings", headers=poq["h"],
+                           json={"poq_card_fee_pct": bad})
+            assert r.status_code == 422, bad

@@ -14,6 +14,7 @@ from engine import (
     Shift,
     UnknownRoleError,
     compute_day_points_hours,
+    to_cents,
 )
 
 
@@ -430,3 +431,64 @@ class TestJobLevelExclusion:
             Shift("Jan", "JANITORIAL", 8), Shift("Bus", "BUSSER", 5)])
         assert "Jan" not in ev.payout_cents
         assert ev.support_payout_cents["Bus"] == 4800
+
+
+class TestCardProcessingFee:
+    """Owner 2026-08-13: Poquitos withholds the card processor's fee from
+    CREDIT tips before anything is pooled, so every share is of money the
+    venue actually received. Cash tips are never reduced."""
+
+    def test_fee_comes_off_before_pooling(self):
+        out = compute_day_points_hours(
+            credit_tips=1000, cash_tips=100, card_fee_pct=Decimal("3"),
+            shifts=[Shift("A", "SERVER", 8), Shift("C", "LINE_COOK", 8)])
+        assert out.credit_tips_gross_cents == 100000
+        assert out.card_fee_cents == 3000          # 3% of the CARD tips only
+        assert out.total_tips_cents == 107000      # 970 card + 100 cash
+        assert out.foh_pool_cents == 85600
+
+    def test_cash_tips_are_never_reduced(self):
+        """All-cash day: the processor never touched it, so no fee."""
+        out = compute_day_points_hours(
+            credit_tips=0, cash_tips=500, card_fee_pct=Decimal("3"),
+            shifts=[Shift("A", "SERVER", 8)])
+        assert out.card_fee_cents == 0
+        assert out.total_tips_cents == 50000
+
+    def test_default_is_no_deduction(self):
+        """A rate must be set deliberately — never assumed."""
+        out = compute_day_points_hours(credit_tips=1000, shifts=[Shift("A", "SERVER", 8)])
+        assert out.card_fee_cents == 0
+        assert out.total_tips_cents == 100000
+
+    def test_conservation_holds_after_the_fee(self):
+        out = compute_day_points_hours(
+            credit_tips=333.33, cash_tips=11.11, card_fee_pct=Decimal("2.75"),
+            shifts=[Shift("A", "BARTENDER", 5), Shift("B", "BUSSER", 3),
+                    Shift("C", "LINE_COOK", 7)])
+        assert sum(out.tips_payout_cents.values()) == out.total_tips_cents
+        assert (out.credit_tips_gross_cents - out.card_fee_cents
+                + to_cents(11.11)) == out.total_tips_cents
+
+    def test_gratuity_is_not_reduced_by_the_tip_fee(self):
+        """Service charges are a separate pool on a separate payroll line;
+        the tip fee setting must not silently shrink them."""
+        out = compute_day_points_hours(
+            credit_tips=1000, auto_gratuity=200, card_fee_pct=Decimal("5"),
+            shifts=[Shift("A", "SERVER", 8), Shift("C", "LINE_COOK", 8)])
+        assert out.auto_gratuity_cents == 20000
+        assert sum(out.gratuity_payout_cents.values()) == 20000
+
+    def test_fractional_rate_rounds_once_to_the_cent(self):
+        out = compute_day_points_hours(
+            credit_tips=100.07, card_fee_pct=Decimal("2.9"),
+            shifts=[Shift("A", "SERVER", 1)])
+        # 10007c * 2.9% = 290.203c -> 290
+        assert out.card_fee_cents == 290
+        assert out.total_tips_cents == 10007 - 290
+
+    def test_impossible_rates_rejected(self):
+        for bad in (Decimal("-1"), Decimal("100"), Decimal("150")):
+            with pytest.raises(ValueError):
+                compute_day_points_hours(credit_tips=100, card_fee_pct=bad,
+                                         shifts=[Shift("A", "SERVER", 1)])

@@ -1389,12 +1389,29 @@ async function renderDayPoq(dateArg) {
 
   const nice = new Date(dateStr + "T12:00:00").toLocaleDateString(undefined,
     { weekday: "short", month: "short", day: "numeric" });
-  view.append(el("div", { class: "row spread", style: "margin:6px 0 2px" },
-    el("div", {},
-      el("h1", { style: "margin:0" }, nice),
+  // date navigation, same as the other day screens: step a day at a time or
+  // tap the date to open a picker — no round trip via the Period screen
+  const datePick = el("input", { type: "date", value: dateStr,
+    style: "position:absolute;inset:0;opacity:0;width:100%;height:100%" });
+  datePick.addEventListener("change", () => {
+    if (datePick.value) location.hash = `#/day/${datePick.value}`;
+  });
+  const shift = (days) => {
+    const d = new Date(dateStr + "T12:00:00");
+    d.setDate(d.getDate() + days);
+    location.hash = `#/day/${d.toISOString().slice(0, 10)}`;
+  };
+  view.append(el("div", { class: "row spread", style: "margin:6px 2px 8px" },
+    el("div", { style: "position:relative" },
+      el("h1", { style: "margin:0", onclick: () => {
+        try { datePick.showPicker(); } catch { datePick.focus(); } } }, nice),
+      datePick,
       el("div", { class: "stepsub", style: "margin:0" },
         `${ME.venue.name} · 80/20 points pool`)),
-    el("span", { class: `badge ${day.status}` }, day.status.replace("_", " "))));
+    el("div", { class: "row" },
+      el("button", { class: "ghost small", onclick: () => shift(-1) }, "‹"),
+      el("button", { class: "ghost small", onclick: () => shift(1) }, "›"),
+      el("span", { class: `badge ${day.status}` }, day.status.replace("_", " ")))));
 
   /* ---- pull + money ---- */
   const pullBtn = el("button", { class: "ghost small", type: "button" },
@@ -1485,10 +1502,11 @@ async function renderDayPoq(dateArg) {
   view.append(el("div", { class: "seclabel" }, "Private event (optional)"), eventCard);
 
   /* ---- computed ---- */
+  const feeBox = el("div", {});
   const poolsBox = el("div", { class: "pools" });
   const tableBox = el("div", { class: "ptable" });
   const eventBox = el("div", {});
-  view.append(el("div", { class: "seclabel" }, "Distribution"), poolsBox,
+  view.append(el("div", { class: "seclabel" }, "Distribution"), feeBox, poolsBox,
               eventBox, tableBox);
 
   function refreshAll() {
@@ -1499,6 +1517,14 @@ async function renderDayPoq(dateArg) {
         (ISSUE_TEXT[issue.code] || (() => issue.code))(issue.detail)));
     }
     const t = computed?.totals || {};
+    feeBox.textContent = "";
+    if (t.card_fee_cents) {
+      feeBox.append(el("div", { class: "hint", style: "margin:2px 2px 8px" },
+        `Card tips ${fmt(t.credit_tips_gross_cents)} − processing fee `
+        + `${fmt(t.card_fee_cents)} (${computed.card_fee_pct}%) = `
+        + `${fmt(t.credit_tips_gross_cents - t.card_fee_cents)} pooled. `
+        + "Cash tips are not reduced."));
+    }
     poolsBox.textContent = "";
     for (const [v, k] of [[t.total_tips_cents, "Pooled tips"],
                           [t.foh_pool_cents, `FOH 80% · ${t.foh_points_total ?? 0} pts`],
@@ -2378,6 +2404,36 @@ async function renderSettings() {
         el("span", { class: "hint", style: "flex:1" },
           "Flag a no-host day only when fewer than this many bussers worked (the 10%-to-bussers re-split always applies; 0 = never flag):"),
         thrInput)));
+  } else if (ME.venue.tip_model === "POINTS_HOURS") {
+    /* --- POINTS_HOURS: card fee + pool split --- */
+    const mk = (key, value, label, hint) => {
+      const inp = el("input", { type: "text", inputmode: "decimal", value,
+        style: "width:90px;text-align:right" });
+      inp.addEventListener("blur", async () => {
+        const v = inp.value.trim();
+        const n = parseFloat(v);
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          toast("enter a percentage between 0 and 100", true); return;
+        }
+        try {
+          await api("/api/settings", { method: "PUT", body: { [key]: v } });
+          toast(`${label} saved`);
+        } catch (e) { toast(e.message, true); }
+      });
+      return el("div", { class: "card" }, el("h2", {}, label),
+        el("div", { class: "row" },
+          el("span", { class: "hint", style: "flex:1" }, hint), inp,
+          el("span", { class: "unit" }, "%")));
+    };
+    view.append(mk("poq_card_fee_pct", s.poq_card_fee_pct ?? "0",
+      "Card processing fee",
+      "Withheld from CREDIT card tips before anything is pooled, so every "
+      + "share is of money the venue actually received. Cash tips are never "
+      + "reduced. Set 0 for no deduction. Finalized days keep the rate they "
+      + "were locked with."));
+    view.append(mk("poq_foh_pct", s.poq_foh_pct ?? "80",
+      "Front-of-house share",
+      "Percent of pooled tips to FOH; the kitchen takes the exact remainder."));
   } else {
     /* --- POOL_HOURS: host/door tip credit per hour --- */
     const doorInput = el("input", { type: "text", inputmode: "decimal",

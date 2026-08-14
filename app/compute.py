@@ -325,7 +325,7 @@ EMPTY_INPUTS_BY_MODEL["POINTS_HOURS"] = EMPTY_INPUTS_POQ
 
 def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
                         roles: dict, job_roles: dict,
-                        foh_pct="80", support_pct="3") -> dict:
+                        foh_pct="80", support_pct="3", card_fee_pct="0") -> dict:
     """POINTS_HOURS outputs for snapshots/UI: the daily 80/20 points pool plus,
     when the day carries event money, the event pool as well."""
     role_points = {r: Decimal(str(v["points"])) for r, v in roles.items()}
@@ -352,6 +352,7 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
             credit_tips=_dollars(inputs["credit_tips_cents"]),
             cash_tips=_dollars(inputs["cash_tips_cents"]),
             auto_gratuity=_dollars(inputs["auto_gratuity_cents"]),
+            card_fee_pct=Decimal(str(card_fee_pct)),
             shifts=shifts, role_points=role_points, role_side=role_side,
             foh_pct=Decimal(str(foh_pct)), excluded=excluded,
         )
@@ -401,7 +402,12 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
         "model": "POINTS_HOURS",
         "engine_version": engine.__version__,
         "foh_pct": str(foh_pct),
+        # the fee rate this day was computed with, so a finalized snapshot
+        # explains its own numbers even if the rate changes later
+        "card_fee_pct": str(card_fee_pct),
         "totals": {
+            "credit_tips_gross_cents": day.credit_tips_gross_cents,
+            "card_fee_cents": day.card_fee_cents,
             "total_tips_cents": day.total_tips_cents,
             "foh_pool_cents": day.foh_pool_cents,
             "boh_pool_cents": day.boh_pool_cents,

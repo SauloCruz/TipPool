@@ -31,6 +31,11 @@ from .core import ManagerInPoolError, _as_fraction, _cents, distribute_cents, to
 # Poquitos policy: 80% of pooled tips to FOH, the remainder to BOH.
 DEFAULT_POQ_FOH_PCT = Decimal("80")
 
+# Card processing fee withheld from CREDIT tips before pooling (owner
+# 2026-08-13). Default 0 = no deduction: a rate must be set deliberately in
+# Setup, never assumed. Cash tips are untouched — no processor handles them.
+DEFAULT_CARD_FEE_PCT = Decimal("0")
+
 # Points per hour worked, by role (policy "1:1" and ".5:1" tables).
 DEFAULT_ROLE_POINTS = {
     # front of house
@@ -135,6 +140,11 @@ class PointsDayResult:
     side: dict[str, str] = field(default_factory=dict)
     foh_points_total: float = 0.0
     boh_points_total: float = 0.0
+    # card tips before the processor's fee, and the fee withheld from them
+    credit_tips_gross: float = 0.0
+    card_fee: float = 0.0
+    credit_tips_gross_cents: int = 0
+    card_fee_cents: int = 0
 
 
 def _side_weights(shifts, role_points, role_side, want_side):
@@ -156,6 +166,7 @@ def compute_day_points_hours(
     credit_tips=0,
     cash_tips=0,
     auto_gratuity=0,
+    card_fee_pct=DEFAULT_CARD_FEE_PCT,
     shifts: Iterable[Shift] = (),
     role_points: Mapping[str, object] | None = None,
     role_side: Mapping[str, str] | None = None,
@@ -195,9 +206,18 @@ def compute_day_points_hours(
         if _as_fraction(s.hours) < 0:
             raise ValueError(f"negative hours for {s.employee}")
 
-    credit_cents = to_cents(credit_tips)
+    credit_gross_cents = to_cents(credit_tips)
     cash_cents = to_cents(cash_tips)
     gratuity_cents = to_cents(auto_gratuity)
+
+    # The card processor's fee comes off CREDIT tips before anything is
+    # pooled, so every downstream share is of money the venue actually
+    # received. Cash is untouched. Rounded once, to the cent.
+    fee_rate = _as_fraction(card_fee_pct) / 100
+    if not 0 <= fee_rate < 1:
+        raise ValueError("card_fee_pct must be at least 0 and under 100")
+    card_fee_cents = int((credit_gross_cents * fee_rate + Fraction(1, 2)).__floor__())
+    credit_cents = credit_gross_cents - card_fee_cents
     total_cents = credit_cents + cash_cents
 
     # Split once, exactly: BOH takes the remainder so the two pools always
@@ -260,6 +280,10 @@ def compute_day_points_hours(
         sides[n] = "FOH" if foh_w.get(n) else "BOH"
 
     return PointsDayResult(
+        credit_tips_gross=_cents(credit_gross_cents),
+        card_fee=_cents(card_fee_cents),
+        credit_tips_gross_cents=credit_gross_cents,
+        card_fee_cents=card_fee_cents,
         total_tips=_cents(total_cents),
         foh_pool=_cents(foh_cents),
         boh_pool=_cents(boh_cents),

@@ -105,6 +105,10 @@ DEFAULTS = {
     "poq_foh_pct": "80",
     # event support tip-out, per role group, of the event's FOH portion
     "poq_support_pct": "3",
+    # Card processing fee withheld from CREDIT tips before pooling (owner
+    # 2026-08-13). "0" = no deduction; set the venue's real processor rate in
+    # Setup. Cash tips are never touched — no processor handles them.
+    "poq_card_fee_pct": "0",
 }
 
 
