@@ -153,3 +153,36 @@ class TestDesignTokens:
         for sel in [".rail", ".rail .dot", ".scard", ".hrow", ".hedit",
                     ".skipbtn", ".bohgrid", ".hero", ".locklist", ".donecircle"]:
             assert sel in CSS, sel
+
+
+class TestPoquitosDayScreen:
+    """POINTS_HOURS day screen (Poquitos, M6). It must offer the same day
+    controls as the other two venues — an admin has to be able to reopen a
+    locked day, and dates must be navigable without a trip via Period."""
+
+    SCREEN = APP_JS.split("async function renderDayPoq(")[1].split(
+        "/* ---------- period dashboard ---------- */")[0]
+
+    def test_registered_for_the_points_model(self):
+        assert '"POINTS_HOURS") return renderDayPoq' in APP_JS
+
+    def test_admin_can_reopen_a_locked_day(self):
+        assert "/reopen" in self.SCREEN
+        assert "Reopen day" in self.SCREEN
+        assert 'ME.role !== "admin"' in self.SCREEN   # managers cannot
+        assert "View period" in self.SCREEN
+
+    def test_date_navigation_present(self):
+        assert "shift(-1)" in self.SCREEN and "shift(1)" in self.SCREEN
+        assert "showPicker" in self.SCREEN
+
+    def test_card_fee_is_spelled_out_not_silent(self):
+        assert "processing fee" in self.SCREEN
+        assert "Cash tips are not reduced" in self.SCREEN
+
+    def test_role_and_points_shown_per_shift(self):
+        assert "rolechip" in self.SCREEN
+        assert "pt/h" in self.SCREEN
+
+    def test_blocking_issue_stops_finalize(self):
+        assert "Blocked — fix mappings in Setup" in self.SCREEN

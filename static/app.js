@@ -1570,12 +1570,42 @@ async function renderDayPoq(dateArg) {
     drawShifts();
   }
 
-  /* ---- finalize ---- */
+  /* ---- finalize / reopen ---- */
   const blocking = (sq?.issues || []).some((i) => i.severity === "blocking");
-  const finBtn = el("button", { class: "primary-grow", type: "button" },
-    finalized ? "Finalized" : "Finalize — lock this day");
-  finBtn.disabled = finalized || blocking;
+  const finBtn = el("button", { class: "primary-grow", type: "button" });
+  if (finalized) {
+    // Same rule as the other venues: an admin can reopen a locked day (a new
+    // snapshot version is written on re-finalize); a manager cannot.
+    const version = day.snapshots?.length
+      ? day.snapshots[day.snapshots.length - 1].version : 1;
+    view.append(el("div", { class: "note" },
+      `Locked — snapshot v${version}. Reopening keeps the old version and `
+      + "writes a new one when you finalize again."));
+    if (ME.role === "admin") {
+      finBtn.className = "danger primary-grow";
+      finBtn.textContent = "Reopen day";
+    } else {
+      finBtn.className = "ghost primary-grow";
+      finBtn.textContent = "View period";
+    }
+  } else {
+    finBtn.textContent = blocking
+      ? "Blocked — fix mappings in Setup" : "Finalize — lock this day";
+    if (blocking) finBtn.className = "ghost primary-grow";
+    finBtn.disabled = blocking;
+  }
   finBtn.addEventListener("click", async () => {
+    if (finalized) {
+      if (ME.role !== "admin") { location.hash = `#/period/${dateStr}`; return; }
+      if (!confirm("Reopen this finalized day? A new snapshot version will be "
+                   + "written when it is finalized again.")) return;
+      try {
+        await api(`/api/days/${dateStr}/reopen`, { method: "POST" });
+        toast("Day reopened");
+        location.reload();
+      } catch (e) { toast(e.message, true); }
+      return;
+    }
     if (!confirm("Finalize this day? It writes an immutable snapshot.")) return;
     try {
       await api(`/api/days/${dateStr}/finalize`, { method: "POST" });
