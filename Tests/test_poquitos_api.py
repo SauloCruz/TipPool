@@ -469,13 +469,44 @@ class TestTipRateMetric:
         assert "Average tip rate (card + cash / net sales),17.00%" in body
         assert "Average tip rate incl. auto-gratuity" in body
 
-    def test_rate_is_not_reported_without_sales(self, client, poq, staff):
-        """No sales pulled yet -> no denominator, so no misleading 0%.
-        Uses the NEXT period so the day with sales cannot leak in."""
+    def test_rate_says_unavailable_rather_than_guessing(self, client, poq, staff):
+        """No sales pulled -> no denominator. The report says so explicitly
+        instead of printing a percentage computed from nothing. Uses the NEXT
+        period so the day with sales cannot leak in."""
         client.put("/api/days/2026-09-20", headers=poq["h"], json={
             "credit_tips_cents": 5000,
             "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 5}]})
         client.post("/api/days/2026-09-20/finalize", headers=poq["h"])
         r = client.get("/api/periods/2026-09-20/export.csv", headers=poq["h"])
-        assert r.json if False else True
-        assert "Average tip rate" not in r.text
+        assert "Average tip rate,unavailable" in r.text
+        rate_line = r.text.split("Average tip rate")[1].split("\n")[0]
+        assert "%" not in rate_line
+
+
+class TestTipRateRefusesPartialData:
+    """A day finalized before net sales were captured has tips but no sales,
+    which shrinks the denominator and OVERSTATES the rate — a plausible wrong
+    number is worse than none for a metric being trended (2026-08-15: a live
+    period read 18.11% instead of 16.97% for exactly this reason)."""
+
+    OLD_DAY = "2026-10-02"      # tips, no sales (pre-feature shape)
+    NEW_DAY = "2026-10-03"      # tips and sales
+
+    def test_period_lists_the_days_missing_sales(self, client, poq, staff):
+        shifts = [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 8}]
+        client.put(f"/api/days/{self.OLD_DAY}", headers=poq["h"], json={
+            "credit_tips_cents": 89047, "shifts": shifts})       # no net_sales
+        client.put(f"/api/days/{self.NEW_DAY}", headers=poq["h"], json={
+            "credit_tips_cents": 10000, "net_sales_cents": 60000, "shifts": shifts})
+        for d in (self.OLD_DAY, self.NEW_DAY):
+            assert client.post(f"/api/days/{d}/finalize",
+                               headers=poq["h"]).status_code == 200
+        p = client.get(f"/api/periods/{self.OLD_DAY}", headers=poq["h"]).json()
+        assert p["days_missing_sales"] == [self.OLD_DAY]
+
+    def test_csv_says_unavailable_rather_than_a_wrong_number(self, client, poq):
+        r = client.get(f"/api/periods/{self.OLD_DAY}/export.csv", headers=poq["h"])
+        assert "Average tip rate,unavailable" in r.text
+        assert "re-pull those days" in r.text
+        # the true-but-partial figure must not appear
+        assert "%" not in r.text.split("Average tip rate")[1].split("\n")[0]

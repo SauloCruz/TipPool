@@ -1301,6 +1301,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                       "foh_pool_cents": 0, "auto_gratuity_cents": 0}
         staff: dict[int, dict] = {}
         draft_dates, flagged_dates = [], []
+        days_missing_sales: list[str] = []
 
         for d in period_days(start, end):
             key = d.isoformat()
@@ -1329,6 +1330,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for k in totals:
                 totals[k] += outputs["totals"].get(k, 0)
             if is_poq:
+                # A day with tips but no sales figure (finalized before net
+                # sales were captured) would silently shrink the tip-rate
+                # denominator and overstate the rate. Track it so reports can
+                # refuse to show a number rather than a wrong one.
+                if (outputs["totals"].get("total_tips_cents")
+                        and not outputs["totals"].get("net_sales_cents")):
+                    days_missing_sales.append(key)
                 for line in outputs["people"]:
                     s_ = staff.setdefault(line["employee_id"], {
                         "employee_id": line["employee_id"], "name": line["name"],
@@ -1477,6 +1485,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # the fee rate in force, so reports can label the deduction
             "card_fee_pct": (settings_store.get_setting(
                 conn, venue["id"], "poq_card_fee_pct") if is_poq else None),
+            # dates whose sales are unknown — the tip rate is not reportable
+            # until these are re-pulled
+            "days_missing_sales": days_missing_sales,
             "venue": {"id": venue["id"], "name": venue["name"],
                       "slug": venue["slug"]},
             "boh_monthly": boh_monthly,
@@ -1664,7 +1675,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ]:
                 w.writerow([label, f"{cents / 100:.2f}"])
             sales = t.get("net_sales_cents", 0)
-            if sales:
+            if s.get("days_missing_sales"):
+                w.writerow(["Average tip rate", "unavailable — no sales data for "
+                            + ", ".join(s["days_missing_sales"]) + " (re-pull those days)"])
+            elif sales:
                 disc = (t.get("credit_tips_gross_cents", 0)
                         + t.get("cash_tips_cents", 0))
                 w.writerow(["Average tip rate (card + cash / net sales)",

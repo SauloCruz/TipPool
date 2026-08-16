@@ -1646,16 +1646,18 @@ async function renderDayPoq(dateArg) {
 /** Discretionary tips (card + cash, before the processor's fee) as a share of
  *  net sales. Gratuity is excluded by default: it is contractual, not a
  *  reflection of service, so including it would blunt the signal. */
-function tipRate(t, { withGratuity = false } = {}) {
+function tipRate(t, { withGratuity = false, missingDays = [] } = {}) {
   const sales = t.net_sales_cents || 0;
-  if (!sales) return null;
+  // A period missing any day's sales has too small a denominator, which
+  // overstates the rate — refuse rather than publish a wrong trend point.
+  if (!sales || (missingDays && missingDays.length)) return null;
   const tips = (t.credit_tips_gross_cents || 0) + (t.cash_tips_cents || 0)
     + (withGratuity ? (t.auto_gratuity_gross_cents || 0) : 0);
   return (tips / sales) * 100;
 }
 function pct(v) { return v === null ? "—" : `${v.toFixed(2)}%`; }
 
-function poolTiles(t, model) {
+function poolTiles(t, model, missingDays = []) {
   // Each tip model names its pools differently — POINTS_HOURS has no
   // boh_allocation_cents (its kitchen slice is boh_pool_cents), so it needs
   // its own row rather than falling through to the hourly-pool labels.
@@ -1669,7 +1671,10 @@ function poolTiles(t, model) {
        [t.processing_fee_total_cents, "Processing fee"],
        [t.total_tips_cents, "Pooled tips"], [t.foh_pool_cents, "FOH 80%"],
        [t.boh_pool_cents, "Kitchen 20%"], [t.auto_gratuity_cents, "Auto-gratuity"],
-       [null, "Avg tip rate", pct(tipRate(t)), `on ${fmt(t.net_sales_cents || 0)} net sales`]]
+       [null, "Avg tip rate", pct(tipRate(t, { missingDays })),
+        missingDays.length
+          ? `needs re-pull: ${missingDays.join(", ")}`
+          : `on ${fmt(t.net_sales_cents || 0)} net sales`]]
     : [[t.total_tips_cents, "Total tips"], [t.boh_allocation_cents, "Kitchen share"],
        [t.foh_pool_cents, "FOH pool"], [t.auto_gratuity_cents, "Auto-gratuity"]];
   return el("div", { class: "pools" },
@@ -1719,7 +1724,7 @@ async function renderPeriod(anchorArg) {
 
   const toggle = schemeToggle(p, () => route());
   if (toggle) view.append(toggle);
-  view.append(poolTiles(p.totals, p.model));
+  view.append(poolTiles(p.totals, p.model, p.days_missing_sales || []));
 
   const daysCard = el("div", { class: "card" }, el("h2", {}, "Days"));
   for (const d of p.days) {
@@ -2128,10 +2133,14 @@ async function renderPrintSummary(anchorArg) {
           el("td", { class: "num" }, "−" + fmt(t.processing_fee_total_cents || 0))),
         el("tr", {}, el("td", {}, "Front of house (80%)"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),
         el("tr", {}, el("td", {}, "Kitchen (20%)"), el("td", { class: "num" }, fmt(t.boh_pool_cents || 0))),
-        el("tr", {}, el("td", {}, `Average tip rate — on ${fmt(t.net_sales_cents || 0)} net sales`),
-          el("td", { class: "num" }, pct(tipRate(t)))),
+        el("tr", {}, el("td", {}, (p.days_missing_sales || []).length
+            ? `Average tip rate — unavailable, no sales for ${p.days_missing_sales.join(", ")}`
+            : `Average tip rate — on ${fmt(t.net_sales_cents || 0)} net sales`),
+          el("td", { class: "num" },
+            pct(tipRate(t, { missingDays: p.days_missing_sales })))),
         el("tr", { class: "sub" }, el("td", {}, "· including auto-gratuity"),
-          el("td", { class: "num" }, pct(tipRate(t, { withGratuity: true })))),
+          el("td", { class: "num" }, pct(tipRate(t, {
+            withGratuity: true, missingDays: p.days_missing_sales })))),
       ] : [
         el("tr", {}, el("td", {}, "Kitchen share"), el("td", { class: "num" }, fmt(t.boh_allocation_cents || 0))),
         el("tr", {}, el("td", {}, "FOH pool"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),
