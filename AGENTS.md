@@ -72,14 +72,17 @@ with:
   path would previously have gone further and subtracted NEGATIVE hours. The
   pull endpoint also wraps unexpected exceptions into a 500 that names the
   date and the actual error, and logs the traceback.
-- **M6 Poquitos STARTED (2026-08-03):** third venue, third tip model
+- **M6 Poquitos LIVE (2026-08-14):** third venue, third tip model
   `POINTS_HOURS` — 80/20 FOH/BOH split, points x hours per role, role read
-  from each timecard's Square job (`wage.title`). Engine + 24 tests are DONE
-  (`engine/points_hours.py`); spec and open questions in `docs/M6-poquitos.md`.
-  Still to do: venue row + `SQUARE_ACCESS_TOKEN__POQUITOS`, job-title -> role
-  mapping screen, compute dispatch, day screen, export. The event sub-model is
-  built too (compute_event_points_hours); three minor event rules remain open in
-  that doc — do not invent them.
+  from each timecard's Square job (`wage.title`). Engine, venue row and
+  credentials, compute dispatch, day screen, period screen and exports are all
+  DONE and running on real payroll; spec in `docs/M6-poquitos.md`. The event
+  sub-model is built (`compute_event_points_hours`) but three minor event rules
+  remain open in that doc — do not invent them. Still to do: the job-title ->
+  role map lives in settings (`poq_job_roles`) with no Setup screen, so a new
+  Square job title blocks the day until someone edits the setting; and no
+  `Event Bartender` job exists in Square yet, so a bartender working an event
+  lands in the DAILY pool.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
   **452 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run

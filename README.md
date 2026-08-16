@@ -12,9 +12,10 @@ distribution deterministically, locks finalized days into immutable snapshots, a
 the exact reports a restaurant needs to pay people — weekly cash payouts and
 payroll-ready exports.
 
-Built for and battle-tested at two working venues in Seattle: a bar running an
-hours-proportional tip pool, and an Italian restaurant running a percentage tip-out model.
-One app, one login, two completely different sets of rules.
+Built for and battle-tested at three working venues in Seattle: a bar running an
+hours-proportional tip pool, an Italian restaurant running a percentage tip-out model, and
+a Mexican restaurant running a points-and-hours pool. One app, one login, three completely
+different sets of rules.
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
@@ -45,19 +46,31 @@ after auditing exactly those bugs in a production workbook, with three design ru
 
 ## Features
 
-### Two tip models, one platform
+### Three tip models, one platform
 
-| | Hourly pool (`POOL_HOURS`) | Percent tip-out (`PERCENT_TIPOUT`) |
-|---|---|---|
-| Who earns | Front-of-house pool by tippable hours; kitchen gets a % of food sales | Each server keeps 65% of their own tips; 20% / 10% / 5% tip out to bussers, host, kitchen |
-| Hours | Timecards clipped to the open-to-public window (prep and after-midnight work excluded), then rounded up to the next 0.05 h | Presence-based — single shift, checkbox roster, even splits |
-| Role weighting | Host/door shifts earn half credit per hour, marked per person per day (staff work dual roles); the rate is configurable and recorded on each snapshot | Fixed roles per person, no hourly weighting |
-| Kitchen | Daily even split of the food-sales allocation | Monthly pool: the 5% accumulates and is split among a roster chosen at payroll time |
-| Edge cases | Negative-pool days flagged, never paid negative | No-host nights re-route the host share to bussers; empty pools return to contributing servers — all flagged, all configurable |
-| Gratuity | Separate pool, hours-proportional | Separate pool, even split among front-of-house |
+| | Hourly pool (`POOL_HOURS`) | Percent tip-out (`PERCENT_TIPOUT`) | Points × hours (`POINTS_HOURS`) |
+|---|---|---|---|
+| Who earns | Front-of-house pool by tippable hours; kitchen gets a % of food sales | Each server keeps 65% of their own tips; 20% / 10% / 5% tip out to bussers, host, kitchen | Everything pooled, split 80% front-of-house / 20% kitchen; each side divided by points × hours |
+| Hours | Timecards clipped to the open-to-public window (prep and after-midnight work excluded), then rounded up to the next 0.05 h | Presence-based — single shift, checkbox roster, even splits | As Square reports them, to the hundredth of an hour; no window clipping |
+| Role weighting | Host/door shifts earn half credit per hour, marked per person per day (staff work dual roles); the rate is configurable and recorded on each snapshot | Fixed roles per person, no hourly weighting | Points per role (1.25 bartender / shift lead, 1.0 server, 0.5 support). **The role comes from the shift, not the person** — Square records the job chosen at clock-in, so someone who bartends Friday and hosts Saturday is credited correctly for each |
+| Kitchen | Daily even split of the food-sales allocation | Monthly pool: the 5% accumulates and is split among a roster chosen at payroll time | 20% of every pool, split by kitchen hours worked |
+| Edge cases | Negative-pool days flagged, never paid negative | No-host nights re-route the host share to bussers; empty pools return to contributing servers — all flagged, all configurable | Unmapped job title blocks the day; card processing fee withheld before pooling; excluded jobs earn nothing and never dilute anyone else's share |
+| Gratuity | Separate pool, hours-proportional | Separate pool, even split among front-of-house | Separate pool, same 80/20 split and the same points |
+| Periods | Semi-monthly | Weekly Fri–Thu cash payout + monthly payroll | Semi-monthly |
 
-Auto-gratuity (service charges) is tracked separately from tips end-to-end in both models —
-different tax treatment, separate payroll line, never merged.
+Auto-gratuity (service charges) is tracked separately from tips end-to-end in all three
+models — different tax treatment, separate payroll line, never merged.
+
+The points model also handles **private events**: staff clocked in under an event job are
+paid from that event's pool instead of the night's, support roles are tipped out a
+configurable percentage of the event's front-of-house portion per role, and the venue's
+admin fee never touches the staff pool.
+
+**Card processing fees.** Where the venue's policy withholds the processor's fee before
+distributing, the fee applies to everything the processor actually handled — card tips and
+auto-gratuity, never cash — so every share is of money the venue really received. The rate
+is a setting that defaults to zero (it must be set deliberately, never assumed) and the
+rate used is written into each day's snapshot, so changing it never moves a finalized day.
 
 ### Square integration that doesn't trust itself
 
@@ -91,7 +104,8 @@ different tax treatment, separate payroll line, never merged.
 
 ### Reports that match how restaurants pay
 
-- **Semi-monthly** (1st–15th / 16th–EOM) payroll periods for the hourly-pool model.
+- **Semi-monthly** (1st–15th / 16th–EOM) payroll periods for the hourly-pool and
+  points models.
 - **Weekly Friday–Thursday** cash tip payout *and* **monthly** payroll reports for the
   tip-out model — including per-employee **cash round-up** (payouts pre-filled to the
   next amount ending in zero, editable per period, with the total round-up tracked so
@@ -99,10 +113,19 @@ different tax treatment, separate payroll line, never merged.
 - **CSV exports** with component columns (keep vs. pool share vs. returned vs. gratuity)
   so every number on the report can be traced back to its rule.
 - A prominent **"Cash to pay out"** total — the exact figure to withdraw from the bank.
-- **Print views** (browser print-to-PDF, no dependencies): a signable period summary
-  for any venue, and per-employee **IRS Form 4070 facsimiles** for tip-out venues —
-  cash tips, card tips, tips paid out, and net tips per month, with SSN/address left
-  blank for the employee to complete by hand.
+- **A money-source breakdown on every total** — card tips gross, declared cash tips, and
+  the processing fee withheld — so a period can be checked line by line against the
+  point-of-sale's own card, cash, and service-charge figures.
+- **Average tip percentage** for the period (discretionary tips over net sales, with
+  auto-gratuity shown separately), so service improvements can be tracked over time. If
+  any day in the period is missing its sales figure the rate is withheld entirely and the
+  dates are named — a short denominator overstates the rate, and a plausible wrong number
+  is worse than none.
+- **Print views** (browser print-to-PDF, no dependencies): a signable period summary for
+  any venue; per-employee **IRS Form 4070 facsimiles** for tip-out venues — cash tips,
+  card tips, tips paid out, and net tips per month, with SSN/address left blank for the
+  employee to complete by hand; and **take-home stubs**, a pay-envelope slip per person
+  printed 3 or 4 to a page with a cut line, for handing out with the paystub.
 
 ### Trust & audit
 
@@ -122,13 +145,13 @@ Deliberately boring, in the best way:
 | Layer | Choice | Why |
 |---|---|---|
 | Engine | Pure Python module (`engine/`) — no I/O, no framework | Money math is testable in isolation; 46 golden days from the original workbook verify it cent-for-cent |
-| Backend | FastAPI + stdlib `sqlite3` (`app/`) | Two venues, a handful of users — no ORM, no server fleet, WAL mode, per-request connections |
+| Backend | FastAPI + stdlib `sqlite3` (`app/`) | Three venues, a handful of users — no ORM, no server fleet, WAL mode, per-request connections |
 | Frontend | No-build vanilla JS SPA (`static/`) | One command to run, nothing to compile, trivial to containerize; assets served `no-cache` so updates apply on reload |
 | Auth | Session cookies, scrypt password hashing (stdlib) | Zero crypto dependencies |
 | Config | Everything in `.env` | Migrating to a host like Fly or Railway is config-only |
 
 ```
-engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, window clipping)
+engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, POINTS_HOURS, window clipping)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
 Tests/      452 tests: golden days, engine properties, API contracts, sync, RBAC
@@ -238,10 +261,10 @@ working on the app should use git from the start of the task:
 
 ## Status
 
-**In production at two venues.** Daily entries, Square pulls, finalized snapshots, weekly
-cash payouts, and monthly payroll exports are live. The engine's golden-file suite
-reproduces three historical pay periods from the original spreadsheet to the cent, and
-the full suite stands at **443 passing tests**.
+**In production at three venues.** Daily entries, Square pulls, finalized snapshots,
+weekly cash payouts, and payroll exports are live. The engine's golden-file suite
+reproduces three historical pay periods — 46 days — from the original spreadsheet to the
+cent, and the full suite stands at **452 passing tests**.
 
 Historical employee data in the public test fixtures is pseudonymized.
 
@@ -254,7 +277,8 @@ Historical employee data in the public test fixtures is pseudonymized.
 - [x] **Local container smoke-test path** — Dockerfile, Compose, persistent test volume, health check
 - ~~**Historical importer**~~ — dropped: the app went live with real data, so back-loading spreadsheet history is unnecessary
 - [ ] **Hosted deployment** — the app is containerization-ready; hosting is config-only
-- [ ] Per-shift pooling and role-weighted points (modeled for, not built)
+- [x] **Role-weighted points** — points × hours, with the role taken from the clocked-in shift
+- [ ] Per-shift pooling within a single day (one shift per day today)
 - [ ] **Staff self-service view** — let employees look up their own take-home instead of printing stubs
 
 ## License
