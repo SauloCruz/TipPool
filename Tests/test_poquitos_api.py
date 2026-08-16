@@ -369,7 +369,7 @@ class TestCardFeeSetting:
 class TestPoquitosHoursAreNotRoundedUp:
     """Owner 2026-08-14: Poquitos keeps hours as Square reports them (2dp,
     nearest) instead of Tavern Law's round-up-to-0.05. Rounding up was what
-    made these figures drift from the venue's existing TipHaus numbers."""
+    made these figures drift from the venue's previous tip-pool service."""
 
     def test_hours_match_square_to_the_hundredth(self, client, poq, staff):
         fake = client.app.state.square_client_factory()

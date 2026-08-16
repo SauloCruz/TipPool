@@ -218,7 +218,7 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
     grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"], payments)
     # Net sales (ex tax, tip and service charge) — not part of the payout math,
     # but it is the denominator for the period's tip rate. Reproduces Square's
-    # and TipHaus's "Total Sales" exactly.
+    # own "Total Sales" figure exactly.
     net_sales = sum(
         _amount((o.get("net_amounts") or {}).get("total_money"))
         - _amount((o.get("net_amounts") or {}).get("tax_money"))

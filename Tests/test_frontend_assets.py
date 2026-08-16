@@ -216,3 +216,56 @@ class TestPeriodScreenPerModel:
         poq = period.split('p.model === "POINTS_HOURS"')[1].split("} else {")[0]
         assert "s.boh_cents" not in poq
         assert "s.tips_cents + s.gratuity_cents" in poq   # a real take-home total
+
+
+class TestTakeHomeStubs:
+    """Pay-envelope slips printed from the export screen: one per employee,
+    3 or 4 to a page with a cut line between. They are handed to staff, so
+    the total must be the sum of the rows printed above it and the figures
+    must come from the same payload the export report renders."""
+
+    STUBS = APP_JS.split("async function renderPrintStubs(")[1].split(
+        "\n/* ---------- audit log")[0]
+    LINES = APP_JS.split("function stubLines(")[1].split("\n}")[0]
+
+    def test_route_and_export_button(self):
+        m = re.search(r"const routes = \{(.*?)\};", APP_JS, re.S)
+        assert '"print-stubs": renderPrintStubs' in m.group(1)
+        assert "#/print-stubs/${p.start}" in APP_JS
+        assert "Take-home stubs" in APP_JS
+
+    def test_reads_the_same_period_payload_as_the_report(self):
+        # not a second endpoint with its own arithmetic: a stub that disagreed
+        # with the summary printed beside it would be worse than no stub
+        assert "/api/periods/${anchor}/export" in self.STUBS
+        assert "reportScheme:" in self.STUBS       # honours the chosen scheme
+
+    def test_total_is_the_sum_of_the_printed_rows(self):
+        # the only total on the slip is derived from the same list that is
+        # rendered, so it cannot drift from the rows above it
+        assert "const total = lines.reduce((a, [, c]) => a + c, 0)" in self.STUBS
+        assert 'el("td", {}, "Take home"), el("td", { class: "num" }, fmt(total))' \
+            in self.STUBS
+
+    def test_every_model_gets_rows(self):
+        for token in ("PERCENT_TIPOUT", "POINTS_HOURS",
+                      "s.boh_cents", "s.event_cents", "s.roundup_cents",
+                      "Auto-gratuity (wages)"):
+            assert token in self.LINES, token
+
+    def test_zero_payout_employees_get_no_slip(self):
+        assert "const paid = p.employees.filter(" in self.STUBS
+        assert "> 0" in self.STUBS
+
+    def test_draft_days_are_called_out(self):
+        assert "not finalized and excluded" in self.STUBS
+
+    def test_three_or_four_per_page_with_a_cut_line(self):
+        assert "stubs per${per}" in self.STUBS
+        assert "for (const n of [3, 4])" in self.STUBS
+        assert "stubsPerPage" in self.STUBS      # the choice sticks
+        assert "border-bottom: 1px dashed" in CSS
+        assert ".stubs.per3 .stub:nth-child(3n)" in CSS
+        assert ".stubs.per4 .stub:nth-child(4n)" in CSS
+        # a slip must never be split across two sheets
+        assert "page-break-inside: avoid" in CSS

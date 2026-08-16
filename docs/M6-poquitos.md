@@ -55,7 +55,7 @@ guess a point value.
 | Cash tips | Σ `declared_cash_tip_money` across the day's timecards, pulled from Square, manual override allowed — identical to Tavern Law. |
 | Private / special events | **Build them** (not deferred). See §2 — specifics still needed. |
 | Card processing fee (2026-08-13) | Withheld from **credit tips only**, before pooling — so every share is of money the venue actually received. Cash tips and auto-gratuity untouched. Setup input `poq_card_fee_pct`, default `0` (never assumed); the rate used is recorded on each snapshot. |
-| Hours (2026-08-14) | As Square reports them: **2 decimals, nearest**. NOT the Tavern Law round-up-to-0.05 rule — that inflated hours ~0.26 h/day and was the main source of drift from the venue's TipHaus figures. |
+| Hours (2026-08-14) | As Square reports them: **2 decimals, nearest**. NOT the Tavern Law round-up-to-0.05 rule — that inflated hours ~0.26 h/day and was the main source of drift from the venue's previous tip-pool service. |
 | Pay periods | Semi-monthly (1st–15th, 16th–EOM), same as TL. Tips are paid through payroll only — no cash payout run (unlike La Fontana). |
 
 ### Flags (non-blocking, surfaced for review)
@@ -234,22 +234,23 @@ new work for this venue.
 
 ---
 
-## 4. Reconciliation against TipHaus (2026-08-14)
+## 4. Reconciliation against the venue's previous system (2026-08-14)
 
-The venue also runs TipHaus, so Aug 5 2026 was compared line by line. Running
-**our** engine with TipHaus's settings reproduced their per-person figures to
-within $0.08 (their display rounds hours to 2dp) and their day total to the
-cent — so the calculation is not in question; only configuration was.
+The venue previously ran another tip-pool service, so Aug 5 2026 was compared
+line by line against it. Running **our** engine with that system's settings
+reproduced its per-person figures to within $0.08 (its display rounds hours to
+2dp) and its day total to the cent — so the calculation was never in question;
+only configuration was.
 
 | Difference | Effect on 2026-08-05 | Status |
 |---|---|---|
 | Hours rounded up to 0.05 vs exact | +0.26 h, shares shift | **FIXED** — Poquitos uses 2dp nearest |
 | Processing fee not charged on gratuity | $3.49 | **FIXED** — fee now covers card tips + gratuity; only cash exempt |
-| Bar Prep points: TipHaus 1.0 vs policy 0.5 | none yet (nobody worked it) | **CLOSED** — owner corrected TipHaus to 0.5 |
+| Bar Prep points: other system 1.0 vs policy 0.5 | none yet (nobody worked it) | **CLOSED** — owner corrected the other system to 0.5 |
 | Auto-gratuity pooled vs reported separately | $0 | moot — see below |
 
-**RECONCILED.** 2026-08-05 now matches TipHaus at **$1,052.42**, with the
-largest per-person difference $0.08 (their display rounds hours to 2dp).
+**RECONCILED.** 2026-08-05 now matches at **$1,052.42**, with the largest
+per-person difference $0.08.
 
 Note the gratuity-pooling question turned out not to matter for anyone's pay:
 we distribute the gratuity by the same 80/20 and the same points as the tips,
@@ -258,17 +259,18 @@ It stays a separate payroll line here because service charges are wages, not
 tips — a real distinction for tax, and the reason the day screen shows Tips,
 Grat and Total as three figures.
 
-After the hours fix, our day total is **$1,055.91** against TipHaus's
-**$1,052.42** — a gap of exactly **$3.49 = 2.2% of the $158.60 gratuity**,
-which TipHaus charges the processing fee against and we do not.
+Before the hours fix our day total was **$1,055.91** against the other
+system's **$1,052.42** — a gap of exactly **$3.49 = 2.2% of the $158.60
+gratuity**, which that system charged the processing fee against and we did
+not.
 
-TipHaus's FOH pool lists Tip Sources as *Credit Card Tip, Gratuity Service
-Charge, Gift Card Tip*, i.e. it pools the service charge with tips. The
-Poquitos policy document agrees ("100% of tips, whether from credit cards,
-cash, or gratuities, are pooled together"). The owner's 2026-08-03 ruling to
-this project said the opposite (keep it separate, as at Tavern Law), so the
-two are in conflict and the owner has not yet resolved it. **Do not change the
-gratuity treatment without an explicit ruling.**
+The other system's FOH pool listed its tip sources as credit card tip,
+gratuity service charge and gift card tip, i.e. it pooled the service charge
+with tips. The Poquitos policy document agrees ("100% of tips, whether from
+credit cards, cash, or gratuities, are pooled together"). The owner's
+2026-08-03 ruling to this project said the opposite (keep it separate, as at
+Tavern Law), so the two are in conflict and the owner has not yet resolved it.
+**Do not change the gratuity treatment without an explicit ruling.**
 
 (Gift-card tips were checked: across 1,227 tipped payments in a three-week
 window every one was a plain CARD, so nothing is being missed there.)

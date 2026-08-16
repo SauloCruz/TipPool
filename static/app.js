@@ -88,6 +88,7 @@ const routes = {
   audit: renderAudit,
   "print-summary": renderPrintSummary,   // M4: printable/signable period report
   "print-4070": renderPrint4070,         // LF: Form 4070 facsimile per employee
+  "print-stubs": renderPrintStubs,       // pay-envelope slip per employee
 };
 
 function renderDayDispatch(dateArg) {
@@ -1974,7 +1975,11 @@ async function renderExport(anchorArg) {
   printSummaryBtn.addEventListener("click", () => {
     location.hash = `#/print-summary/${p.start}`;
   });
-  const rowBtns = [dl, printSummaryBtn];
+  const stubsBtn = el("button", { class: "ghost" }, "\u{1F5A8} Take-home stubs");
+  stubsBtn.addEventListener("click", () => {
+    location.hash = `#/print-stubs/${p.start}`;
+  });
+  const rowBtns = [dl, printSummaryBtn, stubsBtn];
   if (p.model === "PERCENT_TIPOUT" && p.scheme === "monthly") {
     const f4070Btn = el("button", { class: "ghost" }, "🖨 Form 4070 (per employee)");
     f4070Btn.addEventListener("click", () => {
@@ -2288,6 +2293,102 @@ async function renderPrint4070(anchorArg) {
         + "Tip-outs received by support staff are shown as cash tips (paid in cash). "
         + "This facsimile is for record-keeping; verify filing requirements with your tax professional.")));
   }
+}
+
+/* ---------- take-home stubs ----------
+   A pay-envelope insert: one small slip per employee showing what they take
+   home for the period, 3 or 4 to a page with a cut line between them. The
+   numbers come from the same period payload the export screen renders, so a
+   stub can never disagree with the report it was printed alongside. */
+
+// Rows shown on one person's stub. The total is always the sum of the rows
+// printed above it, so the slip adds up in front of whoever reads it.
+function stubLines(s, model, scheme) {
+  const lines = [];
+  if (model === "PERCENT_TIPOUT") {
+    lines.push(["Tips", s.tips_cents || 0]);
+    if (scheme === "weekly" && s.roundup_cents) {
+      lines.push(["Rounded up to cash", s.roundup_cents]);
+    }
+  } else if (model === "POINTS_HOURS") {
+    lines.push(["Tips (pooled)", s.tips_cents || 0]);
+    if (s.event_cents) lines.push(["Event payout", s.event_cents]);
+  } else {
+    // POOL_HOURS: kitchen staff are paid from the food-sales share
+    lines.push(["Tips (pooled)", (s.tips_cents || 0) + (s.boh_cents || 0)]);
+  }
+  if (s.gratuity_cents) lines.push(["Auto-gratuity (wages)", s.gratuity_cents]);
+  return lines;
+}
+
+async function renderPrintStubs(anchorArg) {
+  const anchor = anchorArg || ME.today;
+  const saved = sessionStorage.getItem("reportScheme:" + sessionStorage.getItem("venueId"));
+  const p = await api(`/api/periods/${anchor}/export${saved ? `?scheme=${saved}` : ""}`);
+  view.append(printBar(`#/export/${anchor}`));
+  if (p.draft_dates.length) {
+    view.append(el("div", { class: "flag" },
+      `${p.draft_dates.length} day(s) not finalized and excluded: ${p.draft_dates.join(", ")}`));
+  }
+
+  const perKey = "stubsPerPage";
+  let per = Number(sessionStorage.getItem(perKey)) || 3;
+  const stubs = el("div", { class: `stubs per${per}` });
+
+  const sel = el("select", {});
+  for (const n of [3, 4]) {
+    sel.append(el("option", { value: String(n), ...(n === per ? { selected: "" } : {}) },
+      `${n} per page`));
+  }
+  sel.addEventListener("change", () => {
+    per = Number(sel.value);
+    sessionStorage.setItem(perKey, String(per));
+    stubs.className = `stubs per${per}`;
+  });
+  view.append(el("div", { class: "printbar" },
+    el("span", { class: "hint" }, "Cut along the dashed line and put each slip in the envelope with the paystub."),
+    sel));
+
+  const paid = p.employees.filter((s) =>
+    stubLines(s, p.model, p.scheme).reduce((a, [, c]) => a + c, 0) > 0);
+  if (!paid.length) {
+    view.append(el("div", { class: "card" },
+      el("div", { class: "note" }, "Nobody has a payout for this period yet.")));
+    return;
+  }
+
+  const when = `${SCHEME_LABEL[p.scheme] || p.scheme} · ${p.start} to ${p.end}`;
+  for (const s of paid) {
+    const lines = stubLines(s, p.model, p.scheme);
+    const total = lines.reduce((a, [, c]) => a + c, 0);
+    const rows = el("tbody", {});
+    for (const [label, cents] of lines) {
+      rows.append(el("tr", {}, el("td", {}, label), el("td", { class: "num" }, fmt(cents))));
+    }
+    rows.append(el("tr", { class: "total" },
+      el("td", {}, "Take home"), el("td", { class: "num" }, fmt(total))));
+
+    const worked = [`${s.days} day${s.days === 1 ? "" : "s"} worked`];
+    // LF does not track hours (single shift a night), so it has none to show
+    if (p.model !== "PERCENT_TIPOUT" && s.hours) worked.push(`${s.hours.toFixed(2)} hours`);
+    if (p.model === "POINTS_HOURS" && s.points) {
+      worked.push(`${(+s.points.toFixed(4))} points`);
+    }
+
+    stubs.append(el("div", { class: "stub" },
+      el("div", { class: "stubhead" },
+        el("div", { class: "stubname" }, esc(s.name)),
+        el("div", { class: "stubwhen" }, esc(p.venue.name), el("br"), when)),
+      el("table", {}, rows),
+      el("div", { class: "stubfoot" },
+        worked.join(" · "),
+        el("br"),
+        // only worth explaining on a slip that actually carries a gratuity line
+        (s.gratuity_cents
+          ? "Auto-gratuity (service charges) is paid as wages, not tips. " : "")
+        + "Questions about this slip: ask your manager.")));
+  }
+  view.append(stubs);
 }
 
 /* ---------- audit log ---------- */

@@ -534,3 +534,46 @@ main.printpage { max-width: 820px; }
 /* take-home column: the figure the person is actually owed */
 td.tot, th.tot { font-weight: 700; }
 .sheet td.tot { font-weight: 600; }
+
+/* ---------- take-home stubs (pay-envelope inserts) ----------
+   Slips are cut apart by hand, so each one is a fixed fraction of a page
+   height with a dashed guide at the bottom edge. 3 up gives a slip that
+   fits a #10 envelope; 4 up fits more people on fewer sheets. */
+.stubs { background: #fff; border-radius: 10px; padding: 8px 14px; margin: 14px 0; }
+/* inputs default to full width; the per-page picker sits beside its hint */
+.printbar select { width: auto; flex: 0 0 auto; }
+.stub {
+  color: #16181c; padding: 12px 10px 14px;
+  border-bottom: 1px dashed #9aa0a8;
+  page-break-inside: avoid; break-inside: avoid;
+}
+.stubs.per3 .stub { min-height: 2.85in; }
+.stubs.per4 .stub { min-height: 2.05in; }
+.stubhead {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+  border-bottom: 2px solid #16181c; padding-bottom: 6px;
+}
+.stubname { font-size: 1.05rem; font-weight: 800; }
+.stubwhen { color: #5a5f68; font-size: .74rem; text-align: right; line-height: 1.35; }
+.stub table { width: 100%; border-collapse: collapse; margin: 8px 0 6px; }
+.stub td {
+  border-bottom: 1px solid #e2e4e8; color: #16181c;
+  padding: 5px 8px 5px 0; font-size: .88rem;
+}
+.stub td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.stub tr.total td {
+  font-weight: 800; font-size: 1rem; border-bottom: 0;
+  border-top: 2px solid #16181c; padding-top: 7px;
+}
+.stubfoot { color: #5a5f68; font-size: .68rem; line-height: 1.5; }
+
+@media print {
+  .stubs { border-radius: 0; margin: 0; padding: 0 6mm; }
+  /* the cut line only needs to fall between slips, not at a page edge */
+  .stubs.per3 .stub:nth-child(3n), .stubs.per4 .stub:nth-child(4n) {
+    page-break-after: always; break-after: page; border-bottom: 0;
+  }
+  .stub:last-child {
+    page-break-after: auto; break-after: auto; border-bottom: 0;
+  }
+}

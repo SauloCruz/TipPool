@@ -539,7 +539,8 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
             seconds -= max(0.0, min(b1, t_out.timestamp()) - max(b0, t_in.timestamp()))
         # Poquitos: hours as Square reports them, to the hundredth of an hour
         # (owner 2026-08-14). Nearest, NOT the round-up-to-0.05 rule Tavern
-        # Law uses — that is what made these figures drift from TipHaus.
+        # Law uses — that is what made these figures drift from the venue's
+        # previous tip-pool service.
         hours = (Decimal(round(seconds)) / 3600).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP)
         shifts.append({"employee_id": emp["id"], "name": emp["display_name"],

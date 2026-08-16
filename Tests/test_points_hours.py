@@ -494,7 +494,8 @@ class TestCardProcessingFee:
         assert out.total_tips_cents == 19000
 
     def test_reproduces_the_venues_other_system(self):
-        """2026-08-05 reconciled against TipHaus to the cent (M6 doc, s4)."""
+        """2026-08-05 reconciled to the cent against the venue's previous
+        tip-pool service (M6 doc, s4)."""
         out = compute_day_points_hours(
             credit_tips=Decimal("889.57"), cash_tips=Decimal("27.31"),
             auto_gratuity=Decimal("158.60"), card_fee_pct=Decimal("2.2"),
