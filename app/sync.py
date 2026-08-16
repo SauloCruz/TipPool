@@ -23,6 +23,7 @@ from . import settings_store
 from .db import audit, utcnow
 from .square import SquareClient
 from .square_extract import (
+    _amount,
     extract_timecards_poq,
     build_catalog_lookup,
     extract_auto_gratuity,
@@ -38,7 +39,7 @@ SQUARE_FIELDS = ("food_sales_cents", "credit_tips_cents", "auto_gratuity_cents",
 LF_SQUARE_FIELDS = ("server_tips", "server_cash_tips", "auto_gratuity_cents",
                     "hours", "unattributed_tips_cents")
 POQ_SQUARE_FIELDS = ("credit_tips_cents", "cash_tips_cents",
-                     "auto_gratuity_cents", "shifts")
+                     "auto_gratuity_cents", "shifts", "net_sales_cents")
 SQUARE_FIELDS_BY_MODEL = {"POOL_HOURS": SQUARE_FIELDS,
                           "PERCENT_TIPOUT": LF_SQUARE_FIELDS,
                           "POINTS_HOURS": POQ_SQUARE_FIELDS}
@@ -215,6 +216,16 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
     pool is a straight 80/20 of tips, not a % of food."""
     tips = extract_credit_tips(payments)
     grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"], payments)
+    # Net sales (ex tax, tip and service charge) — not part of the payout math,
+    # but it is the denominator for the period's tip rate. Reproduces Square's
+    # and TipHaus's "Total Sales" exactly.
+    net_sales = sum(
+        _amount((o.get("net_amounts") or {}).get("total_money"))
+        - _amount((o.get("net_amounts") or {}).get("tax_money"))
+        - _amount((o.get("net_amounts") or {}).get("tip_money"))
+        - _amount((o.get("net_amounts") or {}).get("service_charge_money"))
+        for o in orders
+    )
     labor = extract_timecards_poq(
         timecards, emp_by_tmid, venue["timezone"],
         # unused by this extractor: Poquitos keeps hours as Square reports
@@ -228,6 +239,7 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
     values = {
         "credit_tips_cents": tips["credit_tips_cents"],
         "auto_gratuity_cents": grat["auto_gratuity_cents"],
+        "net_sales_cents": net_sales,
     }
     if not blocked:
         values["cash_tips_cents"] = labor["cash_tips_cents"]

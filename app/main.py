@@ -114,6 +114,7 @@ class PoqDayInputsBody(BaseModel):
     shifts: list[PoqShiftBody] = []
     event_service_charge_cents: int = Field(default=0, ge=0)
     event_tips_cents: int = Field(default=0, ge=0)
+    net_sales_cents: int = Field(default=0, ge=0)   # reporting only
 
 
 class LFDayInputsBody(BaseModel):
@@ -1294,7 +1295,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                       "credit_tips_gross_cents": 0, "credit_tips_net_cents": 0,
                       "cash_tips_cents": 0, "card_fee_cents": 0,
                       "auto_gratuity_gross_cents": 0, "gratuity_fee_cents": 0,
-                      "processing_fee_total_cents": 0}
+                      "processing_fee_total_cents": 0, "net_sales_cents": 0}
         else:
             totals = {"total_tips_cents": 0, "boh_allocation_cents": 0,
                       "foh_pool_cents": 0, "auto_gratuity_cents": 0}
@@ -1659,8 +1660,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ("Front of house (80%)", t.get("foh_pool_cents", 0)),
                 ("Kitchen (20%)", t.get("boh_pool_cents", 0)),
                 ("Auto-gratuity paid out (net)", t.get("auto_gratuity_cents", 0)),
+                ("Net sales (ex tax/tip/service charge)", t.get("net_sales_cents", 0)),
             ]:
                 w.writerow([label, f"{cents / 100:.2f}"])
+            sales = t.get("net_sales_cents", 0)
+            if sales:
+                disc = (t.get("credit_tips_gross_cents", 0)
+                        + t.get("cash_tips_cents", 0))
+                w.writerow(["Average tip rate (card + cash / net sales)",
+                            f"{disc / sales * 100:.2f}%"])
+                w.writerow(["Average tip rate incl. auto-gratuity",
+                            f"{(disc + t.get('auto_gratuity_gross_cents', 0))
+                               / sales * 100:.2f}%"])
         else:
             # "FOH Hours" stays hours actually worked (what payroll needs);
             # "Credited Hours" is the tip-weighted figure the split used, so a

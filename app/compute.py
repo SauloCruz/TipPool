@@ -318,6 +318,9 @@ EMPTY_INPUTS_POQ = {
     # private / special event on this day (0 pool = no event)
     "event_service_charge_cents": 0,
     "event_tips_cents": 0,
+    # net sales (ex tax/tip/service charge) — reporting only, never paid out;
+    # it is the denominator of the tip rate
+    "net_sales_cents": 0,
 }
 
 EMPTY_INPUTS_BY_MODEL["POINTS_HOURS"] = EMPTY_INPUTS_POQ
@@ -410,6 +413,7 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
             "card_fee_cents": day.card_fee_cents,
             "credit_tips_net_cents": day.credit_tips_gross_cents - day.card_fee_cents,
             "cash_tips_cents": int(inputs["cash_tips_cents"]),
+            "net_sales_cents": int(inputs.get("net_sales_cents") or 0),
             "auto_gratuity_gross_cents": day.auto_gratuity_gross_cents,
             "gratuity_fee_cents": day.gratuity_fee_cents,
             "processing_fee_total_cents": day.card_fee_cents + day.gratuity_fee_cents,

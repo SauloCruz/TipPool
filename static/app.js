@@ -1643,6 +1643,18 @@ async function renderDayPoq(dateArg) {
 /* ---------- period dashboard ---------- */
 
 
+/** Discretionary tips (card + cash, before the processor's fee) as a share of
+ *  net sales. Gratuity is excluded by default: it is contractual, not a
+ *  reflection of service, so including it would blunt the signal. */
+function tipRate(t, { withGratuity = false } = {}) {
+  const sales = t.net_sales_cents || 0;
+  if (!sales) return null;
+  const tips = (t.credit_tips_gross_cents || 0) + (t.cash_tips_cents || 0)
+    + (withGratuity ? (t.auto_gratuity_gross_cents || 0) : 0);
+  return (tips / sales) * 100;
+}
+function pct(v) { return v === null ? "—" : `${v.toFixed(2)}%`; }
+
 function poolTiles(t, model) {
   // Each tip model names its pools differently — POINTS_HOURS has no
   // boh_allocation_cents (its kitchen slice is boh_pool_cents), so it needs
@@ -1656,12 +1668,15 @@ function poolTiles(t, model) {
        [t.cash_tips_cents, "Cash tips"],
        [t.processing_fee_total_cents, "Processing fee"],
        [t.total_tips_cents, "Pooled tips"], [t.foh_pool_cents, "FOH 80%"],
-       [t.boh_pool_cents, "Kitchen 20%"], [t.auto_gratuity_cents, "Auto-gratuity"]]
+       [t.boh_pool_cents, "Kitchen 20%"], [t.auto_gratuity_cents, "Auto-gratuity"],
+       [null, "Avg tip rate", pct(tipRate(t)), `on ${fmt(t.net_sales_cents || 0)} net sales`]]
     : [[t.total_tips_cents, "Total tips"], [t.boh_allocation_cents, "Kitchen share"],
        [t.foh_pool_cents, "FOH pool"], [t.auto_gratuity_cents, "Auto-gratuity"]];
   return el("div", { class: "pools" },
-    ...spec.map(([v, k]) => el("div", { class: "pool" },
-      el("div", { class: "v" }, fmt(v || 0)), el("div", { class: "k" }, k))));
+    ...spec.map(([v, k, shown, sub]) => el("div", { class: "pool" },
+      el("div", { class: "v" }, shown !== undefined ? shown : fmt(v || 0)),
+      el("div", { class: "k" }, k),
+      ...(sub ? [el("div", { class: "k2" }, sub)] : []))));
 }
 
 
@@ -2113,6 +2128,10 @@ async function renderPrintSummary(anchorArg) {
           el("td", { class: "num" }, "−" + fmt(t.processing_fee_total_cents || 0))),
         el("tr", {}, el("td", {}, "Front of house (80%)"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),
         el("tr", {}, el("td", {}, "Kitchen (20%)"), el("td", { class: "num" }, fmt(t.boh_pool_cents || 0))),
+        el("tr", {}, el("td", {}, `Average tip rate — on ${fmt(t.net_sales_cents || 0)} net sales`),
+          el("td", { class: "num" }, pct(tipRate(t)))),
+        el("tr", { class: "sub" }, el("td", {}, "· including auto-gratuity"),
+          el("td", { class: "num" }, pct(tipRate(t, { withGratuity: true })))),
       ] : [
         el("tr", {}, el("td", {}, "Kitchen share"), el("td", { class: "num" }, fmt(t.boh_allocation_cents || 0))),
         el("tr", {}, el("td", {}, "FOH pool"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),

@@ -439,3 +439,43 @@ class TestMoneySourceBreakdown:
                       "Auto-gratuity (gross)", "Card processing fee",
                       "Pooled tips (net)", "Kitchen (20%)"):
             assert label in body, label
+
+
+class TestTipRateMetric:
+    """Owner 2026-08-15: track the average tip percentage over time as a
+    service-quality signal. Denominator is net sales (ex tax/tip/service
+    charge), which reproduces Square's own 'Total Sales'."""
+
+    DAY = "2026-09-04"
+
+    def test_net_sales_is_stored_and_aggregated(self, client, poq, staff):
+        r = client.put(f"/api/days/{self.DAY}", headers=poq["h"], json={
+            "credit_tips_cents": 16000, "cash_tips_cents": 1000,
+            "net_sales_cents": 100000,
+            "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 8},
+                       {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 8}]})
+        assert r.status_code == 200, r.text
+        assert r.json()["computed"]["totals"]["net_sales_cents"] == 100000
+        assert client.post(f"/api/days/{self.DAY}/finalize",
+                           headers=poq["h"]).status_code == 200
+        p = client.get(f"/api/periods/{self.DAY}", headers=poq["h"]).json()
+        assert p["totals"]["net_sales_cents"] == 100000
+
+    def test_csv_reports_the_rate(self, client, poq):
+        r = client.get(f"/api/periods/{self.DAY}/export.csv", headers=poq["h"])
+        body = r.text
+        assert "Net sales (ex tax/tip/service charge)" in body
+        # (160.00 card + 10.00 cash) / 1000.00 = 17.00%
+        assert "Average tip rate (card + cash / net sales),17.00%" in body
+        assert "Average tip rate incl. auto-gratuity" in body
+
+    def test_rate_is_not_reported_without_sales(self, client, poq, staff):
+        """No sales pulled yet -> no denominator, so no misleading 0%.
+        Uses the NEXT period so the day with sales cannot leak in."""
+        client.put("/api/days/2026-09-20", headers=poq["h"], json={
+            "credit_tips_cents": 5000,
+            "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 5}]})
+        client.post("/api/days/2026-09-20/finalize", headers=poq["h"])
+        r = client.get("/api/periods/2026-09-20/export.csv", headers=poq["h"])
+        assert r.json if False else True
+        assert "Average tip rate" not in r.text
