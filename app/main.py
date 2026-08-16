@@ -1307,8 +1307,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         client = get_square_client(venue)
         try:
             members = client.search_team_members()
+            inactive = client.search_team_members(status="INACTIVE")
         except SquareError as exc:
             raise HTTPException(502, str(exc))
+        inactive_ids = {m["id"] for m in inactive}
         cache = [
             {"id": m["id"],
              "name": " ".join(filter(None, [m.get("given_name"), m.get("family_name")]))
@@ -1342,10 +1344,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings_store.put_setting(conn, venue["id"], "square_wage_settings",
                                    wages, admin["id"])
         conn.commit()
-        linked_ids = {r["team_member_id"] for r in conn.execute(
-            "SELECT team_member_id FROM square_link WHERE venue_id = ?",
-            (venue["id"],)).fetchall()}
+        links = conn.execute(
+            "SELECT l.team_member_id AS tmid, e.id, e.display_name, e.active"
+            " FROM square_link l JOIN employee e ON e.id = l.employee_id"
+            " WHERE l.venue_id = ?", (venue["id"],)).fetchall()
+        linked_ids = {r["tmid"] for r in links}
+
+        # Square is the record of who still works here. Someone whose every
+        # linked account has been deactivated there has left, so deactivate
+        # them here too — otherwise they linger on the payroll sheet forever.
+        # The reverse is NOT applied: an employee deactivated here while still
+        # active in Square may have been switched off deliberately, and
+        # silently undoing that would fight the manager.
+        by_emp: dict[int, dict] = {}
+        for r in links:
+            e = by_emp.setdefault(r["id"], {"name": r["display_name"],
+                                            "active": bool(r["active"]),
+                                            "tmids": []})
+            e["tmids"].append(r["tmid"])
+        gone, reactivatable = [], []
+        for eid, e in by_emp.items():
+            all_inactive = all(t in inactive_ids for t in e["tmids"])
+            if e["active"] and all_inactive:
+                conn.execute("UPDATE employee SET active = 0 WHERE id = ?", (eid,))
+                audit(conn, venue["id"], admin["id"], "employee_deactivated",
+                      "employee", eid,
+                      json.dumps({"reason": "inactive in Square"}))
+                gone.append(e["name"])
+            elif not e["active"] and not all_inactive:
+                reactivatable.append(e["name"])
+        conn.commit()
+
         return {"team": cache, "salaried": len(wages),
+                "deactivated": sorted(gone),
+                "active_in_square": sorted(reactivatable),
                 "unlinked": [m for m in cache if m["id"] not in linked_ids]}
 
     # ---------- nightly sync ----------

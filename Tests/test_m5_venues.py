@@ -44,7 +44,11 @@ class FakeSquareLF:
     def retrieve_wage_setting(self, team_member_id):
         return self.wage_settings.get(team_member_id, {})
 
-    def search_team_members(self):
+    inactive_members: list = []
+
+    def search_team_members(self, status="ACTIVE"):
+        if status != "ACTIVE":
+            return self.inactive_members
         return []
 
 

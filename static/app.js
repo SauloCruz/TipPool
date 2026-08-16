@@ -3047,7 +3047,17 @@ async function renderSettings() {
   syncTeamBtn.addEventListener("click", async () => {
     try {
       const out = await api("/api/square/sync-team", { method: "POST" });
-      toast(`${out.team.length} team members, ${out.unlinked.length} unlinked`);
+      const bits = [`${out.team.length} team members`,
+                    `${out.unlinked.length} unlinked`];
+      if ((out.deactivated || []).length) {
+        bits.push(`${out.deactivated.length} deactivated (left in Square)`);
+      }
+      toast(bits.join(", "));
+      // Active in Square but switched off here — possibly deliberate, so it
+      // is reported and never undone automatically.
+      if ((out.active_in_square || []).length) {
+        toast(`Active in Square but inactive here: ${out.active_in_square.join(", ")}`);
+      }
       route();
     } catch (e) { toast(e.message, true); }
   });

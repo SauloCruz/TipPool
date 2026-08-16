@@ -2,6 +2,7 @@
 per-timecard roles, the 80/20 points split, the event pool, and a Square
 pull that reads roles from wage.title."""
 
+import json
 import os
 
 import pytest
@@ -28,7 +29,10 @@ class FakePoqSquare:
 
     team_members: list = []
 
-    def search_team_members(self): return self.team_members
+    inactive_members: list = []
+
+    def search_team_members(self, status="ACTIVE"):
+        return self.team_members if status == "ACTIVE" else self.inactive_members
 
 
 @pytest.fixture(scope="module")
@@ -1259,3 +1263,65 @@ class TestNotOnPayroll:
         sheet = app_js.split("async function renderPrintPayroll(")[1].split(
             "\n/* ---------- ")[0]
         assert "off_payroll_with_pay" in sheet
+
+
+class TestSquareEmploymentStatus:
+    """Square is the record of who still works here. Staff deactivated there
+    would otherwise linger on the payroll sheet forever (owner 2026-08-16)."""
+
+    def _sync(self, client, poq, active, inactive):
+        fake = client.app.state.square_client_factory()
+        fake.team_members = active
+        fake.inactive_members = inactive
+        return client.post("/api/square/sync-team", headers=poq["h"]).json()
+
+    def test_leaving_square_deactivates_them_here(self, client, poq):
+        r = client.post("/api/employees", headers=poq["h"], json={
+            "display_name": "Departed Dana", "pool_role": "FOH",
+            "square_team_member_id": "TM_GONE"})
+        assert r.status_code == 201
+        eid = r.json()["id"]
+        out = self._sync(client, poq, [], [{"id": "TM_GONE", "status": "INACTIVE"}])
+        assert "Departed Dana" in out["deactivated"]
+        emp = {e["id"]: e for e in client.get(
+            "/api/employees", headers=poq["h"]).json()}[eid]
+        assert emp["active"] == 0
+
+    def test_it_is_audit_logged_with_the_reason(self, client, poq):
+        log = client.get("/api/audit-log?limit=250", headers=poq["h"]).json()
+        entry = next(e for e in log if e["action"] == "employee_deactivated")
+        assert "inactive in Square" in json.dumps(entry)
+
+    def test_someone_still_active_in_square_is_never_reactivated(
+            self, client, poq):
+        """A local deactivation may be deliberate — report it, do not undo it."""
+        emp = {e["display_name"]: e for e in client.get(
+            "/api/employees", headers=poq["h"]).json()}["Departed Dana"]
+        out = self._sync(client, poq,
+                         [{"id": "TM_GONE", "given_name": "Departed",
+                           "family_name": "Dana", "status": "ACTIVE"}], [])
+        assert "Departed Dana" in out["active_in_square"]
+        after = {e["id"]: e for e in client.get(
+            "/api/employees", headers=poq["h"]).json()}[emp["id"]]
+        assert after["active"] == 0        # untouched
+
+    def test_someone_with_two_accounts_needs_both_gone(self, client, poq):
+        r = client.post("/api/employees", headers=poq["h"], json={
+            "display_name": "Two Accounts", "pool_role": "FOH",
+            "square_team_member_id": "TM_ONE"})
+        eid = r.json()["id"]
+        client.patch(f"/api/employees/{eid}", headers=poq["h"],
+                     json={"square_team_member_id": "TM_TWO"})
+        out = self._sync(client, poq,
+                         [{"id": "TM_TWO", "status": "ACTIVE"}],
+                         [{"id": "TM_ONE", "status": "INACTIVE"}])
+        assert "Two Accounts" not in out["deactivated"]
+        assert {e["id"]: e for e in client.get(
+            "/api/employees", headers=poq["h"]).json()}[eid]["active"] == 1
+
+    def test_a_deactivated_person_still_appears_where_they_worked(
+            self, client, poq, staff):
+        """Deactivating must not erase them from a period they worked —
+        someone who left mid-period still has to be paid for it."""
+        p = client.get("/api/periods/2027-05-04/export", headers=poq["h"]).json()
+        assert any(r["name"] == "Ana" for r in p["payroll"])

@@ -149,9 +149,11 @@ class SquareClient:
             "GET", f"/v2/team-members/{team_member_id}/wage-setting")
         return (data or {}).get("wage_setting") or {}
 
-    def search_team_members(self) -> list[dict]:
+    def search_team_members(self, status: str = "ACTIVE") -> list[dict]:
+        """Team members at this venue's locations. Square filters by status,
+        so ask for INACTIVE explicitly to find people who have left."""
         return self._paged_post("/v2/team-members/search", {
             "query": {"filter": {"location_ids": self.location_ids,
-                                 "status": "ACTIVE"}},
+                                 "status": status}},
             "limit": 100,
         }, "team_members")
