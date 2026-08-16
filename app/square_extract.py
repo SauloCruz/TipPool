@@ -550,8 +550,12 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
                        "declared_cents": declared,
                        # clock times so period reports can split a shift at
                        # midnight the way Square's labor day does, and run
-                       # weekly overtime across day boundaries
-                       "start_at": tc["start_at"], "end_at": tc["end_at"]})
+                       # weekly overtime across day boundaries; the rate is
+                       # the one in force for THIS job, so a person who
+                       # bartends and hosts is costed correctly for each
+                       "start_at": tc["start_at"], "end_at": tc["end_at"],
+                       "rate_cents": ((tc.get("wage") or {}).get("hourly_rate")
+                                      or {}).get("amount")})
 
     issues = []
     if unmapped_members:

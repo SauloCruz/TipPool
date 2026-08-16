@@ -553,13 +553,20 @@ class TestTakeHomeColumn:
             checked += 1
         assert checked >= 2       # the server and the cook
 
-    def test_screens_show_the_same_total(self):
-        """Export screen and printable summary use one shared helper, so the
-        number cannot drift between them."""
+    def test_take_home_comes_from_one_shared_helper(self):
+        """The take-home total is computed in exactly one place, so no screen
+        showing it can drift from another. The printable summary is now a
+        PAYROLL sheet reporting gross pay instead (owner 2026-08-16), and its
+        figure comes from the server, so it cannot drift either."""
         app_js = (__import__("pathlib").Path(__file__).parent.parent
                   / "static" / "app.js").read_text()
         assert "function takeHome(s)" in app_js
-        assert app_js.count("fmt(takeHome(s))") >= 2
+        assert "fmt(takeHome(s))" in app_js
+        summary = app_js.split("async function renderPrintSummary(")[1].split(
+            "\nasync function ")[0]
+        assert "Gross pay" in summary
+        assert "s.gross_pay_cents" in summary
+        assert "takeHome(" not in summary      # payroll sheet, not a pay slip
 
 
 class TestCashDeclarationBreakdown:
@@ -751,3 +758,82 @@ class TestHoursOnTheClock:
             assert r.status_code == expect, (body, r.text)
         client.put("/api/settings", headers=poq["h"],
                    json={"poq_workweek_start": "SUN"})
+
+
+class TestPayrollSheet:
+    """Owner 2026-08-16: the printable summary is what gets keyed into the
+    payroll form, so it drops the pool mechanics (points, days worked) and
+    carries hours, wages and gross pay instead. Wages are a cross-check —
+    payroll computes what is actually paid — so they must agree with it to
+    the cent or they are worse than useless."""
+
+    def test_wages_match_a_real_pay_run(self):
+        """Three people from the 2026-08-01..15 Poquitos pay run, all at
+        $21.30/h with no overtime. These pin the two rounding rules: hours to
+        2dp BEFORE multiplying, and the money rounded UP to the cent."""
+        from datetime import date
+        from engine import period_labor
+        P0, P1 = date(2026, 8, 1), date(2026, 8, 15)
+        # dates a week apart so nobody trips the 40 h line — these three had
+        # no overtime in the real run
+        cases = [
+            # (name, (date, hours) pieces, Square's wages)
+            ("Abel", [(7, 5.67), (8, 7.30), (15, 7.98)], 44624),
+            # 53.7167 h -> 53.72 -> x 21.30 = 1144.236 -> 1144.24
+            ("Alexander", [(3, 26.858333), (10, 26.858334)], 114424),
+            # 53.6667 h -> 53.67 -> x 21.30 = 1143.171 -> 1143.18, NOT .17
+            ("Angel", [(3, 26.833333), (10, 26.833334)], 114318),
+        ]
+        for name, pieces, want in cases:
+            entries = [(name, date(2026, 8, day), h, 2130) for day, h in pieces]
+            got = period_labor(entries, P0, P1)[name]
+            assert got["overtime_hours"] == 0.0, (name, got)
+            assert got["wages_cents"] == want, (name, got)
+
+    def test_overtime_is_paid_at_time_and_a_half(self):
+        from datetime import date
+        from engine import period_labor
+        # 45 h in one Sunday-start week at $20.00: 40 reg + 5 OT
+        entries = [("ana", date(2026, 8, 3 + i), 9.0, 2000) for i in range(5)]
+        got = period_labor(entries, date(2026, 8, 1), date(2026, 8, 15))["ana"]
+        assert got["paid_hours"] == 45.0
+        assert got["overtime_hours"] == 5.0
+        assert got["regular_hours"] == 40.0
+        # 40 x 20 + 5 x 30 = 950
+        assert got["wages_cents"] == 95000
+
+    def test_two_jobs_at_different_rates_are_costed_separately(self):
+        from datetime import date
+        from engine import period_labor
+        entries = [("ana", date(2026, 8, 3), 10.0, 2130),
+                   ("ana", date(2026, 8, 4), 10.0, 1850)]
+        got = period_labor(entries, date(2026, 8, 1), date(2026, 8, 15))["ana"]
+        assert got["wages_cents"] == 21300 + 18500
+
+    def test_gross_pay_is_wages_plus_every_tip_line(self, client, poq, staff):
+        p = client.get("/api/periods/2026-11-06/export", headers=poq["h"]).json()
+        for e in p["employees"]:
+            if e.get("gross_pay_cents") is None:
+                continue
+            assert e["gross_pay_cents"] == (
+                e["wages_cents"] + e["tips_cents"]
+                + e["event_cents"] + e["gratuity_cents"])
+
+    def test_printed_sheet_drops_points_and_days(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        summary = app_js.split("async function renderPrintSummary(")[1].split(
+            "\nasync function ")[0]
+        poq_head = summary.split("const head = isLF")[1].split("const body")[0]
+        # the POINTS_HOURS arm only — the POOL_HOURS arm after it still has
+        # Days and Hours columns, and should
+        poq_head = poq_head.split("isPoq")[1].split('\n    : el("tr"')[0]
+        # comments explain WHY those columns went; only the real labels count
+        labels = "\n".join(l for l in poq_head.splitlines()
+                           if not l.strip().startswith("//"))
+        assert '"Points"' not in labels
+        assert '"Days"' not in labels
+        for col in ("Reg hrs", "OT hrs", "Wages", "Gross pay"):
+            assert col in poq_head, col
+        # and the sheet says what the gross is and is not
+        assert "Square Payroll computes what is actually paid" in summary

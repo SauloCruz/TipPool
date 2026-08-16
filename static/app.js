@@ -2232,11 +2232,15 @@ async function renderPrintSummary(anchorArg) {
         ...(weekly ? [el("th", { class: "num" }, "Cash paid"), el("th", { class: "num" }, "Round-up")] : []),
         el("th", { class: "num" }, "Gratuity"))
     : isPoq
-    ? el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
-        el("th", { class: "num" }, "Event"), el("th", { class: "num" }, "Gratuity"),
-        el("th", { class: "num" }, "Total"),
-        el("th", { class: "num" }, "Days"), el("th", { class: "num" }, "Hours"),
-        el("th", { class: "num" }, "Points"))
+    // laid out for keying into payroll: hours and rate first, then each pay
+    // line the form asks for, then the gross those add up to. Points and
+    // days worked are pool mechanics and have no place on a payroll sheet.
+    ? el("tr", {}, el("th", {}, "Employee"),
+        el("th", { class: "num" }, "Reg hrs"), el("th", { class: "num" }, "OT hrs"),
+        el("th", { class: "num" }, "Wages"),
+        el("th", { class: "num" }, "Tips"), el("th", { class: "num" }, "Event"),
+        el("th", { class: "num" }, "Gratuity"),
+        el("th", { class: "num tot" }, "Gross pay"))
     : el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
         el("th", { class: "num" }, "Gratuity"), el("th", { class: "num" }, "Days"),
         el("th", { class: "num" }, "Hours"));
@@ -2251,13 +2255,14 @@ async function renderPrintSummary(anchorArg) {
           el("td", { class: "num" }, fmt(s.gratuity_cents)))
       : isPoq
       ? el("tr", {}, el("td", {}, esc(s.name)),
+          el("td", { class: "num" }, s.regular_hours == null ? "—" : hrs(s.regular_hours)),
+          el("td", { class: "num" }, s.overtime_hours ? hrs(s.overtime_hours) : "—"),
+          el("td", { class: "num" }, s.wages_cents == null ? "—" : fmt(s.wages_cents)),
           el("td", { class: "num" }, fmt(s.tips_cents)),
           el("td", { class: "num" }, s.event_cents ? fmt(s.event_cents) : "—"),
           el("td", { class: "num" }, fmt(s.gratuity_cents)),
-          el("td", { class: "num tot" }, fmt(takeHome(s))),
-          el("td", { class: "num" }, s.days),
-          el("td", { class: "num" }, s.hours ? s.hours.toFixed(2) : "—"),
-          el("td", { class: "num" }, s.points ? (+s.points.toFixed(4)).toString() : "—"))
+          el("td", { class: "num tot" },
+            s.gross_pay_cents == null ? "—" : fmt(s.gross_pay_cents)))
       : el("tr", {}, el("td", {}, esc(s.name)),
           el("td", { class: "num" }, fmt(s.tips_cents + s.boh_cents)),
           el("td", { class: "num" }, fmt(s.gratuity_cents)),
@@ -2291,7 +2296,14 @@ async function renderPrintSummary(anchorArg) {
     el("div", {}, el("span", { class: "fieldlabel", style: "min-width:auto" }, "Date:"),
       el("span", { class: "blank short" }))));
   sheet.append(el("div", { class: "footnote" },
-    "Finalized days only. Auto-gratuity (service charges) is reported as wages, separate from tips."));
+    "Finalized days only. Auto-gratuity (service charges) is reported as wages, separate from tips."
+    + (isPoq
+      ? " Hours are paid hours from the timecards (a shift is split at midnight),"
+        + " not the tippable hours the pool divides by. Wages are hours x the"
+        + " job's hourly rate, overtime at time and a half; gross pay is wages"
+        + " plus tips, event and gratuity. Provided to check against payroll —"
+        + " Square Payroll computes what is actually paid."
+      : "")));
   view.append(sheet);
 }
 

@@ -29,7 +29,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-__all__ = ["split_at_midnight", "weekly_overtime", "LaborHours"]
+__all__ = ["split_at_midnight", "weekly_overtime",
+           "weekly_overtime_by_employee", "period_labor", "LaborHours"]
 
 
 class LaborHours:
@@ -114,3 +115,74 @@ def weekly_overtime(day_hours, period_start: date, period_end: date,
             if over and period_start <= d <= period_end:
                 overtime += over
     return overtime
+
+
+def period_labor(entries, period_start: date, period_end: date,
+                 week_start: int = 6, threshold: float = 40.0) -> dict:
+    """Per-employee paid hours, overtime and wages for a pay period.
+
+    `entries` is an iterable of (employee key, local date, hours, rate_cents)
+    already split at midnight, covering the whole workweek around the period.
+
+    Wages are a CROSS-CHECK, not a payroll authority — Square Payroll computes
+    what it actually pays. Two details were reverse-engineered from live pay
+    runs and matter to the cent:
+
+    * hours are rounded to 2dp **before** multiplying, because that is the
+      figure the payroll form shows and multiplies;
+    * the result is rounded **up** to the cent. Half-up disagreed with a real
+      pay run by $0.01 (53.67 h x $21.30 = $1143.171 was paid as $1143.18).
+
+    Overtime is priced as a half-time premium on top of the hours already
+    counted at base rate, so it is correct when someone worked two jobs at
+    different rates in the same week.
+    """
+    from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
+
+    by_emp: dict[object, dict] = {}
+    for who, d, hours, rate in entries:
+        e = by_emp.setdefault(who, {"paid": 0.0, "at_rate": defaultdict(float)})
+        if period_start <= d <= period_end:
+            e["paid"] += hours
+            e["at_rate"][rate or 0] += hours
+
+    overtime = weekly_overtime_by_employee(
+        entries, period_start, period_end, week_start, threshold)
+
+    out = {}
+    for who, e in by_emp.items():
+        ot = overtime.get(who, 0.0)
+        base = Decimal(0)
+        paid_at_rate = 0.0
+        for rate, hours in e["at_rate"].items():
+            h2 = Decimal(str(hours)).quantize(Decimal("0.01"),
+                                              rounding=ROUND_HALF_UP)
+            base += h2 * Decimal(rate) / 100
+            paid_at_rate += hours * rate
+        # half-time premium: the base hour is already in `base` above
+        avg_rate = (paid_at_rate / e["paid"]) if e["paid"] else 0.0
+        premium = (Decimal(str(round(ot, 2))) * Decimal("0.5")
+                   * Decimal(str(avg_rate)) / 100)
+        wages = (base + premium).quantize(Decimal("0.01"),
+                                          rounding=ROUND_CEILING)
+        out[who] = {
+            "paid_hours": round(e["paid"], 2),
+            "overtime_hours": round(ot, 2),
+            "regular_hours": round(e["paid"] - ot, 2),
+            "wages_cents": int(wages * 100),
+        }
+    return out
+
+
+def weekly_overtime_by_employee(entries, period_start: date, period_end: date,
+                                week_start: int = 6,
+                                threshold: float = 40.0) -> dict:
+    """`weekly_overtime`, but keeping each employee's total separate."""
+    per: dict[object, float] = defaultdict(float)
+    grouped: dict[object, list] = defaultdict(list)
+    for who, d, hours, *_ in entries:
+        grouped[who].append((who, d, hours))
+    for who, rows in grouped.items():
+        per[who] = weekly_overtime(rows, period_start, period_end,
+                                   week_start=week_start, threshold=threshold)
+    return per

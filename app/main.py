@@ -1310,7 +1310,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # "nearest round number (ending in zero)": 507.39 -> 510, 500 -> 500
         return -(-cents // 1000) * 1000
 
-    def labor_hours_for(conn, venue, start: date, end: date) -> engine.LaborHours:
+    def labor_hours_for(conn, venue, start: date, end: date):
         """Worked and overtime hours for a period, for RECONCILIATION ONLY.
 
         Reads the clock times off each day's stored Square pull rather than
@@ -1357,11 +1357,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for d, h in engine.split_at_midnight(
                         datetime.fromisoformat(sh["start_at"]),
                         datetime.fromisoformat(sh["end_at"]), tz):
-                    day_hours.append((sh["employee_id"], d, h))
-        worked = sum(h for _, d, h in day_hours if start <= d <= end)
+                    day_hours.append((sh["employee_id"], d, h,
+                                      sh.get("rate_cents") or 0))
+        worked = sum(h for _, d, h, _r in day_hours if start <= d <= end)
         overtime = engine.weekly_overtime(
+            [(w, d, h) for w, d, h, _r in day_hours],
+            start, end, week_start=week_start, threshold=threshold)
+        per_employee = engine.period_labor(
             day_hours, start, end, week_start=week_start, threshold=threshold)
-        return engine.LaborHours(worked, overtime, unknown)
+        return engine.LaborHours(worked, overtime, unknown), per_employee
 
     def period_summary(conn, venue, anchor: date, finalized_only: bool,
                        scheme: str) -> dict:
@@ -1584,7 +1588,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             totals["credited_hours"] = round(
                 sum(s_["hours"] for s_ in staff.values()), 2)
             # from the clock times: the point-of-sale's own labor figures
-            totals.update(labor_hours_for(conn, venue, start, end).as_dict())
+            labor, per_emp = labor_hours_for(conn, venue, start, end)
+            totals.update(labor.as_dict())
+            # per person, so the payroll form can be filled and cross-checked
+            for s_ in staff.values():
+                lab = per_emp.get(s_["employee_id"])
+                s_.update(lab or {"paid_hours": None, "overtime_hours": None,
+                                  "regular_hours": None, "wages_cents": None})
+                s_["gross_pay_cents"] = (
+                    None if lab is None else
+                    lab["wages_cents"] + s_["tips_cents"]
+                    + s_["event_cents"] + s_["gratuity_cents"])
 
         return {
             "start": start.isoformat(), "end": end.isoformat(),
