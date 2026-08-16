@@ -11,6 +11,7 @@ from app.square_extract import (
     extract_credit_tips,
     extract_food_sales,
     extract_timecards,
+    extract_timecards_poq,
 )
 
 TZ = "America/Los_Angeles"
@@ -409,3 +410,26 @@ class TestRefundedServiceCharges:
             [self.payment("A", 36680, 36680), self.payment("B", 51512, 6000)])
         assert out["auto_gratuity_cents"] == 6560     # only B survives
         assert out["refunded_gratuity_cents"] == 5530
+
+
+class TestExcludedStaffCashStillPools:
+    """Owner 2026-08-15: tips an excluded person captures still go into the
+    pool — they simply receive none of it. Poquitos differs from Tavern Law
+    here, where manager timecards are ignored outright."""
+
+    def test_owner_declared_cash_is_pooled(self):
+        def tc(tm, title, declared):
+            return {"team_member_id": tm,
+                    "start_at": "2026-08-07T18:00:00-07:00",
+                    "end_at": "2026-08-08T02:00:00-07:00",
+                    "wage": {"title": title},
+                    "declared_cash_tip_money": money(declared)}
+        emps = {"T1": {"id": 1, "display_name": "Owner", "pool_role": "EXCLUDED"},
+                "T2": {"id": 2, "display_name": "Srv", "pool_role": "FOH"}}
+        out = extract_timecards_poq(
+            [tc("T1", "Owner", 14300), tc("T2", "Server", 1000)],
+            emps, "America/Los_Angeles", Decimal("0"),
+            {"Owner": "OWNER", "Server": "SERVER"})
+        assert out["cash_tips_cents"] == 15300      # both, not just the server
+        roles = {s["name"]: s["role"] for s in out["shifts"]}
+        assert roles["Owner"] == "OWNER"            # shift kept, earns nothing

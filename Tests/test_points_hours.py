@@ -515,3 +515,49 @@ class TestCardProcessingFee:
             with pytest.raises(ValueError):
                 compute_day_points_hours(credit_tips=100, card_fee_pct=bad,
                                          shifts=[Shift("A", "SERVER", 1)])
+
+
+class TestExcludedStaffContributeButDoNotEarn:
+    """Owner ruling 2026-08-15: "my hours don't count, but any tip I capture
+    goes into the pool as I cannot retain them."
+
+    So a pool-excluded person may work an EXCLUDED-side job (Owner, Shift
+    manager, Training) without breaking the day — that shift earns nothing by
+    construction, which is the whole point. The hard block exists to stop them
+    EARNING, not to stop them clocking in."""
+
+    def test_excluded_person_may_work_a_non_earning_job(self):
+        out = run(credit_tips=100, excluded=["Owner"], shifts=[
+            Shift("Owner", "OWNER", 9.45),
+            Shift("Srv", "SERVER", 5), Shift("Cook", "LINE_COOK", 5)])
+        assert "Owner" not in out.tips_payouts        # earns nothing
+        assert out.tips_payouts["Srv"] == 80.00       # and dilutes nobody
+        assert out.tips_payouts["Cook"] == 20.00
+
+    def test_every_non_earning_job_is_allowed(self):
+        for role in ("OWNER", "SHIFT_MANAGER", "KITCHEN_MANAGER",
+                     "JANITORIAL", "STAFF_TRAINER", "TRAINING_SHIFT"):
+            out = run(credit_tips=100, excluded=["Mgr"], shifts=[
+                Shift("Mgr", role, 8), Shift("Srv", "SERVER", 5)])
+            assert "Mgr" not in out.tips_payouts, role
+
+    def test_an_earning_job_is_still_hard_blocked(self):
+        """The guardrail itself is untouched: an excluded person on a paying
+        role still refuses to compute."""
+        with pytest.raises(ManagerInPoolError):
+            run(excluded=["Owner"], shifts=[Shift("Owner", "SERVER", 5)])
+        with pytest.raises(ManagerInPoolError):
+            run(excluded=["Owner"], shifts=[Shift("Owner", "LINE_COOK", 5)])
+
+    def test_bar_manager_exception_still_works(self):
+        out = run(credit_tips=100, excluded=["Mgr"], shifts=[
+            Shift("Mgr", "BARTENDER", 4), Shift("Srv", "SERVER", 5)])
+        assert out.tips_payouts["Mgr"] == 40.00
+
+    def test_their_hours_never_reach_a_pool(self):
+        """A long owner shift must not shrink anyone else's share."""
+        alone = run(credit_tips=100, shifts=[Shift("Srv", "SERVER", 5)])
+        with_owner = run(credit_tips=100, excluded=["Owner"], shifts=[
+            Shift("Owner", "OWNER", 12), Shift("Srv", "SERVER", 5)])
+        assert alone.tips_payouts["Srv"] == with_owner.tips_payouts["Srv"]
+        assert with_owner.foh_points_total == alone.foh_points_total

@@ -198,9 +198,16 @@ def compute_day_points_hours(
         raise UnknownRoleError(
             f"no points mapping for role(s): {', '.join(unknown)}")
 
+    # The hard block exists to stop an excluded person EARNING from the pool.
+    # A shift whose role is itself EXCLUDED (Owner, Shift manager, Training…)
+    # earns nothing by construction, so working one is not a violation — the
+    # owner clocks in, contributes the tips they take, and is paid none of it
+    # (owner 2026-08-15). Only an excluded person on an EARNING role offends.
     offenders = sorted({
         s.employee for s in shifts
-        if s.employee in blocked and s.role.upper() not in allowed_for_managers
+        if s.employee in blocked
+        and role_side.get(s.role) != "EXCLUDED"
+        and s.role.upper() not in allowed_for_managers
     })
     if offenders:
         raise ManagerInPoolError(
