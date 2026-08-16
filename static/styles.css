@@ -577,3 +577,21 @@ td.tot, th.tot { font-weight: 700; }
     page-break-after: auto; break-after: auto; border-bottom: 0;
   }
 }
+
+/* ---------- declared-cash breakdown (POINTS_HOURS day screen) ----------
+   Sits under the Cash tips field and names each timecard that declared, so
+   a total that disagrees with Square's dashboard can be read at a glance. */
+.declarations { margin: -2px 0 14px; font-size: .78rem; }
+.decrow {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 4px 0; border-bottom: 1px solid var(--line);
+}
+.decrow .who { color: var(--muted); display: flex; flex-wrap: wrap;
+  align-items: baseline; gap: 6px; }
+.decrow .job { color: var(--muted); opacity: .75; font-size: .72rem; }
+.decrow .num { font-variant-numeric: tabular-nums; color: var(--text); }
+.decrow.dectotal {
+  border-bottom: 0; font-weight: 700; padding-top: 6px;
+}
+.decrow.dectotal .who { text-transform: uppercase; letter-spacing: .04em;
+  font-size: .68rem; }

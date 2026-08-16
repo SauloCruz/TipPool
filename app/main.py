@@ -843,12 +843,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         muted = set(settings_store.get_setting(conn, row["venue_id"], "muted_warnings"))
         issues = [i for i in sq["issues"]
                   if i["severity"] != "warning" or i["code"] not in muted]
+        # Who declared the cash. Square's own labor dashboard leaves manager
+        # declarations out of its declared-cash tile while still counting the
+        # manager's hours, so the totals disagree and there is no way to see
+        # why from the outside. This is the one slice of `raw` the day screen
+        # gets: enough to name the declarers, not the whole extract.
+        declarations = [
+            {"name": sh["name"], "job_title": sh.get("job_title"),
+             "role": sh.get("role"), "cents": sh["declared_cents"]}
+            for sh in (sq.get("raw") or {}).get("shifts", [])
+            if sh.get("declared_cents")
+        ]
         return {
             "pulled_at": sq["pulled_at"],
             "values": sq["values"],
             "issues": issues,
             "muted_count": len(sq["issues"]) - len(issues),
             "blocked_fields": sorted(sync.blocked_fields(sq)),
+            "cash_declarations": sorted(
+                declarations, key=lambda d: (-d["cents"], d["name"])),
         }
 
     def day_payload(conn, venue, d: date) -> dict:

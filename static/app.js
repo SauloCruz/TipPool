@@ -1434,6 +1434,30 @@ async function renderDayPoq(dateArg) {
   const issuesBox = el("div", {});
   view.append(issuesBox);
 
+  // Who declared the cash, straight off the timecards. An EXCLUDED job
+  // (Shift manager, Owner) earns nothing but still pools what it declared —
+  // that is the owner's rule, and the line Square's own dashboard omits.
+  function cashDeclarations() {
+    const rows = (sq && sq.cash_declarations) || [];
+    if (!rows.length) return el("div", {});
+    const box = el("div", { class: "declarations" });
+    for (const r of rows) {
+      // the shift carries the policy role (SHIFT_MANAGER); whether it earns
+      // is the role's side, same lookup the shifts table below uses
+      const excluded = (roles[r.role] || {}).side === "EXCLUDED";
+      box.append(el("div", { class: "decrow" },
+        el("span", { class: "who" }, esc(r.name),
+          r.job_title ? el("span", { class: "job" }, esc(r.job_title)) : null,
+          excluded ? el("span", { class: "src blocked" }, "pooled, earns nothing") : null),
+        el("span", { class: "num" }, fmt(r.cents))));
+    }
+    const sum = rows.reduce((a, r) => a + r.cents, 0);
+    box.append(el("div", { class: "decrow dectotal" },
+      el("span", { class: "who" }, `Declared on ${rows.length} timecard${rows.length === 1 ? "" : "s"}`),
+      el("span", { class: "num" }, fmt(sum))));
+    return box;
+  }
+
   const moneyCard = el("div", { class: "card" });
   for (const [key, label] of [["credit_tips_cents", "Credit card tips"],
                               ["cash_tips_cents", "Cash tips (declared)"],
@@ -1445,6 +1469,7 @@ async function renderDayPoq(dateArg) {
     inp.addEventListener("input", scheduleSave);
     moneyCard.append(el("label", {}, label),
       el("div", { class: "money" }, inp));
+    if (key === "cash_tips_cents") moneyCard.append(cashDeclarations());
   }
   view.append(el("div", { class: "seclabel" }, "Tips pooled today"), moneyCard);
 

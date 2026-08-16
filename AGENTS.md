@@ -84,7 +84,7 @@ with:
   `Event Bartender` job exists in Square yet, so a bartender working an event
   lands in the DAILY pool.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **452 tests**.
+  **457 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.
@@ -418,3 +418,4 @@ Ship M2 to real use before building M3 — it already beats the spreadsheet.
 | Poquitos daily view columns (2026-08-14) | The distribution table shows **Tips, Grat, (Event), Total** plus a totals row, because tips/gratuity/event are three pools but take-home is the sum — and that sum is what another system reports as a single figure. |
 | Take-home column on exports (2026-08-15) | Every Poquitos period surface — period view, Export screen, print summary and payroll CSV — carries a **Take Home / Total** column (tips + event + auto-gratuity) alongside the separate pools. Payroll still needs tips and gratuity on distinct lines (different tax treatment), so the columns stay; the total is for the manager checking one number per person. Computed by one shared `takeHome()` helper in the frontend so the screens cannot drift. |
 | Take-home stubs (2026-08-15) | The export screen prints a **pay-envelope slip per employee** (`#/print-stubs`), 3 or 4 to a page with a dashed cut line, to hand out with the paystub. All three venues; rows differ by model (TL/POQ pooled tips, POQ event, LF weekly cash round-up) and the total is always the sum of the rows printed above it. Built off the same `/export` payload the report renders, so a slip can never disagree with the report beside it. A staff-facing app to check take-home is BACKLOG, not v1. |
+| Declared-cash breakdown (2026-08-16) | The Poquitos day screen lists **who declared** the cash under the Cash tips field — name, Square job, amount, and a "pooled, earns nothing" tag on EXCLUDED-side jobs. Square's own labor dashboard counts a manager's HOURS but drops the manager's declared cash from its declared-cash tile (2026-08-15: their $40 vs our $152, the gap being a Shift manager's $112), so the totals disagree with no way to see why from the outside. Each shift now carries `declared_cents`; `square_payload` exposes only that slice of `raw`. Days pulled before this change show nothing until re-pulled. |

@@ -519,7 +519,7 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
             missing_clockout.append(emp["display_name"])
             shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
                            "role": role, "job_title": title, "hours": 0.0,
-                           "missing_clockout": True})
+                           "declared_cents": declared, "missing_clockout": True})
             continue
         t_in, t_out = _iso(tc["start_at"]), _iso(tc["end_at"])
         if t_out <= t_in:
@@ -528,7 +528,7 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
                 f"{t_out.astimezone(tz).strftime('%H:%M')})")
             shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
                            "role": role, "job_title": title, "hours": 0.0,
-                           "invalid_interval": True})
+                           "declared_cents": declared, "invalid_interval": True})
             continue
 
         seconds = t_out.timestamp() - t_in.timestamp()
@@ -544,7 +544,8 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
         hours = (Decimal(round(seconds)) / 3600).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP)
         shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
-                       "role": role, "job_title": title, "hours": float(hours)})
+                       "role": role, "job_title": title, "hours": float(hours),
+                       "declared_cents": declared})
 
     issues = []
     if unmapped_members:

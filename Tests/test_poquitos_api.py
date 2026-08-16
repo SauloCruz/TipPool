@@ -560,3 +560,103 @@ class TestTakeHomeColumn:
                   / "static" / "app.js").read_text()
         assert "function takeHome(s)" in app_js
         assert app_js.count("fmt(takeHome(s))") >= 2
+
+
+class TestCashDeclarationBreakdown:
+    """Square's own labor dashboard counts a manager's HOURS but drops the
+    manager's declared cash from its declared-cash tile, so its total
+    disagrees with ours (2026-08-15: their $40 vs our $152) with no way to
+    see why. The day screen names each declaring timecard instead."""
+
+    def test_extractor_carries_the_declaration_onto_each_shift(self):
+        from decimal import Decimal
+        from app.square_extract import extract_timecards_poq
+        emps = {"tm1": {"id": 1, "display_name": "Maria Munoz"},
+                "tm2": {"id": 2, "display_name": "Vianeey Palalia"}}
+        roles = {"Server": "SERVER", "Shift manager": "SHIFT_MANAGER"}
+        tcs = [
+            {"team_member_id": "tm1", "wage": {"title": "Server"},
+             "start_at": "2026-08-15T16:32:00-07:00",
+             "end_at": "2026-08-15T23:50:00-07:00",
+             "declared_cash_tip_money": money(4000)},
+            {"team_member_id": "tm2", "wage": {"title": "Shift manager"},
+             "start_at": "2026-08-15T15:28:00-07:00",
+             "end_at": "2026-08-16T00:09:00-07:00",
+             "declared_cash_tip_money": money(11200)},
+        ]
+        out = extract_timecards_poq(tcs, emps, "America/Los_Angeles",
+                                    Decimal("0"), roles)
+        by_name = {sh["name"]: sh for sh in out["shifts"]}
+        assert by_name["Maria Munoz"]["declared_cents"] == 4000
+        assert by_name["Vianeey Palalia"]["declared_cents"] == 11200
+        # the manager's declaration is pooled even though the job earns nothing
+        assert by_name["Vianeey Palalia"]["role"] == "SHIFT_MANAGER"
+        assert out["cash_tips_cents"] == 15200
+
+    def test_a_shift_with_no_clockout_still_reports_what_it_declared(self):
+        from decimal import Decimal
+        from app.square_extract import extract_timecards_poq
+        out = extract_timecards_poq(
+            [{"team_member_id": "tm1", "wage": {"title": "Server"},
+              "start_at": "2026-08-15T16:32:00-07:00",
+              "declared_cash_tip_money": money(4000)}],
+            {"tm1": {"id": 1, "display_name": "Maria Munoz"}},
+            "America/Los_Angeles", Decimal("0"), {"Server": "SERVER"})
+        assert out["shifts"][0]["declared_cents"] == 4000
+        assert out["cash_tips_cents"] == 4000
+
+    def test_day_payload_names_the_declarers_biggest_first(
+            self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Server"},
+             "start_at": "2026-08-27T16:32:00-07:00",
+             "end_at": "2026-08-27T23:50:00-07:00",
+             "declared_cash_tip_money": money(4000)},
+            {"team_member_id": "TM_MGR", "wage": {"title": "Shift manager"},
+             "start_at": "2026-08-27T15:28:00-07:00",
+             "end_at": "2026-08-28T00:09:00-07:00",
+             "declared_cash_tip_money": money(11200)},
+            {"team_member_id": "TM_BEN", "wage": {"title": "Busser"},
+             "start_at": "2026-08-27T17:22:00-07:00",
+             "end_at": "2026-08-27T23:59:00-07:00",
+             "declared_cash_tip_money": money(0)},
+        ]
+        assert client.post("/api/days/2026-08-27/pull",
+                           headers=poq["h"]).status_code == 200
+        sq = client.get("/api/days/2026-08-27", headers=poq["h"]).json()["square"]
+        decs = sq["cash_declarations"]
+        # only timecards that actually declared, largest first
+        assert [d["cents"] for d in decs] == [11200, 4000]
+        assert sum(d["cents"] for d in decs) == sq["values"]["cash_tips_cents"]
+        mgr = decs[0]
+        assert mgr["job_title"] == "Shift manager"
+        # the shift carries the POLICY role; the screen resolves its side
+        # through poq_roles, so this must be the role name, not "EXCLUDED"
+        assert mgr["role"] == "SHIFT_MANAGER"
+        s = client.get("/api/settings", headers=poq["h"]).json()
+        assert s["poq_roles"][mgr["role"]]["side"] == "EXCLUDED"
+
+    def test_raw_extracts_are_still_withheld_from_the_client(
+            self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders, fake.timecards = [], [], []
+        assert client.post("/api/days/2026-09-29/pull",
+                           headers=poq["h"]).status_code == 200
+        sq = client.get("/api/days/2026-09-29", headers=poq["h"]).json()["square"]
+        assert "raw" not in sq
+        assert sq["cash_declarations"] == []
+
+    def test_day_screen_renders_the_breakdown_under_cash_tips(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        poq_fn = app_js.split("async function renderDayPoq(")[1].split(
+            "\nasync function ")[0]
+        assert 'key === "cash_tips_cents"' in poq_fn      # placed under that field
+        assert "sq.cash_declarations" in poq_fn
+        assert '(roles[r.role] || {}).side === "EXCLUDED"' in poq_fn
+        assert "pooled, earns nothing" in poq_fn
+        css = (__import__("pathlib").Path(__file__).parent.parent
+               / "static" / "styles.css").read_text()
+        assert ".declarations" in css and ".decrow" in css
