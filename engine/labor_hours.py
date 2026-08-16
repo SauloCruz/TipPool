@@ -158,6 +158,7 @@ def period_labor(entries, period_start: date, period_end: date,
     for who, e in by_emp.items():
         overtime = 0.0
         premium = Decimal(0)
+        ot_at_rate: dict[int, float] = defaultdict(float)
         for rows in e["weeks"].values():
             week_hours = sum(h for _d, h, _r in rows)
             if not week_hours:
@@ -166,21 +167,28 @@ def period_labor(entries, period_start: date, period_end: date,
             week_rate = Decimal(str(
                 sum(h * r for _d, h, r in rows) / week_hours))
             running = ot_here = 0.0
-            for d, hours, _rate in sorted(rows):
+            for d, hours, rate in sorted(rows):
                 before, running = running, running + hours
                 over = (max(0.0, running - threshold)
                         - max(0.0, before - threshold))
                 if over and period_start <= d <= period_end:
                     ot_here += over
+                    ot_at_rate[rate or 0] += over
             overtime += ot_here
             premium += (Decimal(str(round(ot_here, 2))) * Decimal("0.5")
                         * week_rate / 100)
 
+        # Straight time is priced on the hours as REPORTED — regular and
+        # overtime rounded separately — because those are the two figures the
+        # payroll form shows and multiplies. Rounding the combined total
+        # instead can land a hundredth of an hour away: 63.1333 + 3.9333 is
+        # 63.13 + 3.93 = 67.06 reported, but 67.07 as a single total.
         base = Decimal(0)
         for rate, hours in e["at_rate"].items():
-            h2 = Decimal(str(hours)).quantize(Decimal("0.01"),
-                                              rounding=ROUND_HALF_UP)
-            base += h2 * Decimal(rate) / 100
+            ot_r = ot_at_rate.get(rate, 0.0)
+            for part in (hours - ot_r, ot_r):
+                base += Decimal(str(part)).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP) * Decimal(rate) / 100
         wages = (base + premium).quantize(Decimal("0.01"),
                                           rounding=ROUND_CEILING)
         out[who] = {

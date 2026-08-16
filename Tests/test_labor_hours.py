@@ -175,3 +175,53 @@ class TestBlendedOvertimeRate:
                            ("ana", date(2026, 8, 4), 8.0, 3000)]
         assert period_labor(two_rates_no_ot, self.P0, self.P1
                             )["ana"]["blended_overtime"] is False
+
+
+class TestStraightTimeUsesReportedHours:
+    """Regular and overtime hours are rounded SEPARATELY, because those are
+    the two figures the payroll form shows and multiplies. Rounding the
+    combined total instead can land a hundredth of an hour away, and then
+    the printed hours no longer explain the printed wages.
+
+    From the live 2026-08-01..15 run: 63.1333 regular + 3.9333 overtime is
+    reported as 63.13 + 3.93 = 67.06 h, but 67.0667 rounds to 67.07 as a
+    single total — worth $0.21 at $21.30/h.
+    """
+
+    P0, P1 = date(2026, 8, 1), date(2026, 8, 15)
+
+    def test_the_printed_hours_are_the_hours_priced(self):
+        from engine import period_labor
+        # 67.0667 h in one Sunday week at $21.30: 40 regular, 27.0667 over
+        entries = [("ed", date(2026, 8, 3 + i), 67.0667 / 5, 2130)
+                   for i in range(5)]
+        got = period_labor(entries, self.P0, self.P1)["ed"]
+        reg, ot = got["regular_hours"], got["overtime_hours"]
+        assert round(reg + ot, 2) == 67.07      # the raw total rounds up
+        # ...but pay is built from the two reported figures, not that total
+        from decimal import ROUND_CEILING, Decimal
+        expected = (Decimal(str(reg)) * Decimal("21.30")
+                    + Decimal(str(ot)) * Decimal("1.5") * Decimal("21.30")
+                    ).quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+        assert got["wages_cents"] == int(expected * 100)
+
+    def test_a_real_pay_run_row(self):
+        """Edilberto Pacheco, 2026-08-01..15: 63.13 regular, 3.93 overtime,
+        one rate of $21.30."""
+        from engine import period_labor
+        # 23.1333 h in the first week (no overtime), 43.9333 in the second
+        # (3.9333 over the line) — 67.0667 h in total
+        entries = [("ed", date(2026, 8, 3), 23.1333, 2130),
+                   ("ed", date(2026, 8, 10), 43.9333, 2130)]
+        got = period_labor(entries, self.P0, self.P1)["ed"]
+        assert got["regular_hours"] == 63.13
+        assert got["overtime_hours"] == 3.93
+        # 63.13 x 21.30 + 3.93 x 1.5 x 21.30 = 1470.2325 -> 1470.24
+        assert got["wages_cents"] == 147024
+
+    def test_no_overtime_means_no_change(self):
+        from engine import period_labor
+        entries = [("ana", date(2026, 8, 3), 20.9500, 2130)]
+        got = period_labor(entries, self.P0, self.P1)["ana"]
+        assert got["overtime_hours"] == 0.0
+        assert got["wages_cents"] == 44624       # unchanged from the pay run
