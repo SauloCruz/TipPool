@@ -2023,44 +2023,49 @@ async function renderExport(anchorArg) {
   stubsBtn.addEventListener("click", () => {
     location.hash = `#/print-stubs/${p.start}`;
   });
-  const rowBtns = [dl, printSummaryBtn, stubsBtn];
-  // Days finalized before clock times were stored cannot report hours. This
-  // re-fetches only the timecards onto the stored pull — inputs and
-  // snapshots are untouched, so no locked payout can move.
-  if (p.model === "POINTS_HOURS" && (p.totals.hours_unknown_dates || []).length) {
-    const miss = p.totals.hours_unknown_dates;
-    const btn = el("button", { class: "ghost" }, "\u27F3 Fetch timecard data");
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      btn.textContent = "Fetching\u2026";
+  // Re-reads the period's timecards onto the stored pull — inputs and
+  // snapshots are untouched, so no locked payout can move. Always offered,
+  // not just when hours are missing: it is also how you pick up a timecard
+  // corrected in Square after a day was finalized, and a button that only
+  // exists in the broken case is a button nobody can find.
+  let refreshBtn = null;
+  if (p.model === "POINTS_HOURS") {
+    const miss = p.totals.hours_unknown_dates || [];
+    refreshBtn = el("button", { class: "ghost" }, "\u27F3 Fetch timecard data");
+    refreshBtn.addEventListener("click", async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Fetching\u2026";
       try {
         const out = await api(`/api/periods/${p.start}/refresh-labor?scheme=${p.scheme}`,
           { method: "POST" });
         const bad = (out.failed || []).length;
         toast(`${out.updated.length} day(s) updated`
-          + (bad ? `, ${bad} failed` : "") , !!bad);
+          + (bad ? `, ${bad} failed` : ""), !!bad);
         route();
       } catch (e) {
         toast(e.message, true);
-        btn.disabled = false;
-        btn.textContent = "\u27F3 Fetch timecard data";
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "\u27F3 Fetch timecard data";
       }
     });
-    view.append(el("div", { class: "card" },
-      el("h2", {}, "Hours not available"),
-      el("div", { class: "note" },
-        `${miss.length} day(s) were finalized before timecard detail was stored, `
-        + "so paid hours, overtime and wages cannot be reported: "
-        + `${miss.join(", ")}. Fetching only re-reads the timecards — tips, `
-        + "gratuity and every finalized payout stay exactly as they are."),
-      el("div", { class: "row" }, btn)));
+    if (miss.length) {
+      view.append(el("div", { class: "card" },
+        el("h2", {}, "Hours not available"),
+        el("div", { class: "note" },
+          `${miss.length} day(s) were finalized before timecard detail was stored, `
+          + "so paid hours, overtime and wages cannot be reported: "
+          + `${miss.join(", ")}. Fetching only re-reads the timecards — tips, `
+          + "gratuity and every finalized payout stay exactly as they are.")));
+    }
   }
+  const rowBtns = [dl, printSummaryBtn, stubsBtn];
   if (p.model === "POINTS_HOURS") {
     const payrollBtn = el("button", { class: "ghost" }, "\u{1F5A8} Payroll entry sheet");
     payrollBtn.addEventListener("click", () => {
       location.hash = `#/print-payroll/${p.start}`;
     });
     rowBtns.splice(2, 0, payrollBtn);
+    if (refreshBtn) rowBtns.push(refreshBtn);
   }
   if (p.model === "PERCENT_TIPOUT" && p.scheme === "monthly") {
     const f4070Btn = el("button", { class: "ghost" }, "🖨 Form 4070 (per employee)");

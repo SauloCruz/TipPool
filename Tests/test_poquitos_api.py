@@ -1001,11 +1001,20 @@ class TestLaborBackfill:
                         headers={"X-Venue-Id": str(v["tavern-law"]["id"])})
         assert r.status_code == 422
 
-    def test_the_export_screen_offers_it_only_when_hours_are_missing(self):
+    def test_the_export_screen_always_offers_it(self):
+        """A button that only exists in the broken case is a button nobody
+        can find — and it is also how you pick up a timecard corrected in
+        Square after a day was finalized. The explanatory card is what is
+        conditional, not the button."""
         app_js = (__import__("pathlib").Path(__file__).parent.parent
                   / "static" / "app.js").read_text()
         fn = app_js.split("async function renderExport(")[1].split(
             "\n/* ---------- ")[0]
-        assert 'hours_unknown_dates || []).length' in fn
         assert "refresh-labor" in fn
+        assert "rowBtns.push(refreshBtn)" in fn      # sits with the other buttons
+        # the button is created for every POINTS_HOURS period — missing hours
+        # must not be part of the condition that decides it exists
+        assert 'POINTS_HOURS" && (p.totals.hours_unknown_dates' not in fn
+        # ...while the warning card still depends on there being a problem
+        assert "if (miss.length) {" in fn
         assert "stay exactly as they are" in fn      # says what it will not touch
