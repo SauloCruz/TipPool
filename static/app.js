@@ -2483,6 +2483,10 @@ async function renderPrintPayroll(anchorArg) {
           + "the equivalent hourly rate, not hours worked — the same conversion "
           + "payroll makes. "
         : "")
+      + ((p.totals.off_payroll_with_pay || []).length
+        ? `Not shown, marked as not on payroll but had hours or earnings this `
+          + `period: ${p.totals.off_payroll_with_pay.join(", ")}. `
+        : "")
       + (rows.some((r) => r.no_timecards)
         ? "\u2021 No timecards this period — salaried, or did not work. There "
           + "are no hours or wages to report for them; a salaried figure comes "
@@ -2681,6 +2685,22 @@ async function renderEmployees() {
           route();
         });
       }
+      // Not every account is a payroll employee — an admin login or a
+      // contractor still needs a staff record, but must not print on the
+      // sheet that gets typed into payroll. Distinct from Deactivate, which
+      // says they no longer work here at all.
+      const payrollFlag = el("button", {
+        class: `small ${e.in_payroll ? "ghost" : ""}`, type: "button",
+        title: e.in_payroll
+          ? "On payroll — appears on the payroll entry sheet"
+          : "Not a payroll employee — kept off the payroll entry sheet",
+      }, e.in_payroll ? "on payroll" : "not on payroll");
+      payrollFlag.addEventListener("click", async () => {
+        await api(`/api/employees/${e.id}`, { method: "PATCH",
+          body: { in_payroll: !e.in_payroll } });
+        toast(`${e.display_name} ${e.in_payroll ? "removed from" : "added to"} payroll`);
+        route();
+      });
       const activeBtn = el("button", { class: "ghost small" }, e.active ? "Deactivate" : "Activate");
       activeBtn.addEventListener("click", async () => {
         await api(`/api/employees/${e.id}`, { method: "PATCH", body: { active: !e.active } });
@@ -2691,8 +2711,10 @@ async function renderEmployees() {
           e.display_name,
           e.square_team_member_id
             ? el("span", { class: "src square", title: e.square_team_member_id }, "Square")
-            : null),
-        el("div", { class: "row" }, ...(poolFlag ? [poolFlag] : []), roleSel, activeBtn)));
+            : null,
+          e.in_payroll ? null : el("span", { class: "src manual" }, "no payroll")),
+        el("div", { class: "row" }, ...(poolFlag ? [poolFlag] : []),
+          payrollFlag, roleSel, activeBtn)));
     }
     view.append(card);
   }

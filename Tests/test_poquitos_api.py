@@ -1176,3 +1176,86 @@ class TestSalariedStaff:
             "\n/* ---------- ")[0]
         assert "r.salaried ?" in fn
         assert "not hours worked" in fn
+
+
+class TestNotOnPayroll:
+    """Owner 2026-08-16: the point-of-sale allows a staff account that is not
+    a payroll employee — an admin login, a contractor. Deactivating them is
+    wrong (they are not gone), so they need their own flag that keeps them
+    off the payroll entry sheet only."""
+
+    DAY = "2027-05-04"
+
+    def test_default_is_on_payroll(self, client, poq):
+        r = client.post("/api/employees", headers=poq["h"], json={
+            "display_name": "Console Login", "pool_role": "EXCLUDED"})
+        assert r.status_code == 201, r.text
+        assert r.json()["in_payroll"] == 1
+
+    def test_flag_keeps_them_off_the_sheet_without_deactivating(
+            self, client, poq, staff):
+        emp = {e["display_name"]: e for e in client.get(
+            "/api/employees", headers=poq["h"]).json()}["Console Login"]
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Bartender",
+             "hourly_rate": {"amount": 2000, "currency": "USD"}},
+             "start_at": "2027-05-04T17:00:00-07:00",
+             "end_at": "2027-05-04T23:00:00-07:00",
+             "declared_cash_tip_money": money(0)}]
+        client.post(f"/api/days/{self.DAY}/pull", headers=poq["h"])
+        inputs = client.get(f"/api/days/{self.DAY}", headers=poq["h"]).json()["inputs"]
+        inputs["credit_tips_cents"] = 20000
+        client.put(f"/api/days/{self.DAY}", headers=poq["h"], json=inputs)
+        client.post(f"/api/days/{self.DAY}/finalize", headers=poq["h"])
+
+        names = lambda: [r["name"] for r in client.get(
+            f"/api/periods/{self.DAY}/export",
+            headers=poq["h"]).json()["payroll"]]
+        assert "Console Login" in names()
+
+        r = client.patch(f"/api/employees/{emp['id']}", headers=poq["h"],
+                         json={"in_payroll": False})
+        assert r.status_code == 200, r.text
+        assert "Console Login" not in names()
+
+        # still an active employee, just not a payroll one
+        after = {e["display_name"]: e for e in client.get(
+            "/api/employees", headers=poq["h"]).json()}["Console Login"]
+        assert after["active"] == 1
+        assert after["in_payroll"] == 0
+
+    def test_someone_off_payroll_who_earned_is_named_not_swallowed(
+            self, client, poq, staff):
+        """Dropping a row silently would lose real money. Ana earns, so if
+        she were marked off payroll the sheet has to say she is missing."""
+        ana_id = staff["Ana"]
+        client.patch(f"/api/employees/{ana_id}", headers=poq["h"],
+                     json={"in_payroll": False})
+        try:
+            p = client.get(f"/api/periods/{self.DAY}/export",
+                           headers=poq["h"]).json()
+            assert "Ana" not in [r["name"] for r in p["payroll"]]
+            assert "Ana" in p["totals"]["off_payroll_with_pay"]
+        finally:
+            client.patch(f"/api/employees/{ana_id}", headers=poq["h"],
+                         json={"in_payroll": True})
+
+    def test_a_quiet_account_raises_no_warning(self, client, poq):
+        p = client.get(f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()
+        # Console Login earned nothing, so it is simply absent
+        assert "Console Login" not in p["totals"]["off_payroll_with_pay"]
+
+    def test_staff_screen_offers_the_toggle(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        fn = app_js.split("async function renderEmployees(")[1].split(
+            "\nasync function ")[0]
+        assert "in_payroll: !e.in_payroll" in fn
+        assert "not on payroll" in fn
+        # must read as distinct from Deactivate, which means something else
+        assert "Deactivate" in fn
+        sheet = app_js.split("async function renderPrintPayroll(")[1].split(
+            "\n/* ---------- ")[0]
+        assert "off_payroll_with_pay" in sheet

@@ -456,11 +456,17 @@ class TestMigration:
 
         conn = sqlite3_mod.connect(db_path)
         conn.row_factory = sqlite3_mod.Row
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        from app.db import SCHEMA_VERSION
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         cols = {r[1] for r in conn.execute("PRAGMA table_info(employee)")}
         assert "square_team_member_id" in cols
         assert "round_up_cents" in cols       # v4 (legacy, unused since M5.3)
         assert "always_in_boh_pool" in cols   # v6: salaried kitchen staff
+        assert "in_payroll" in cols           # v8: staff not on payroll
+        # every pre-existing employee stays on the payroll sheet
+        assert conn.execute(
+            "SELECT in_payroll FROM employee WHERE display_name = 'Bree'"
+        ).fetchone()[0] == 1
         user_cols = {r[1] for r in conn.execute("PRAGMA table_info(user)")}
         assert "super_admin" in user_cols
         # v5: existing single links copied into square_link

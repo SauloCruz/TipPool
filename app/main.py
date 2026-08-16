@@ -160,6 +160,9 @@ class EmployeePatch(BaseModel):
     # LF: salaried kitchen staff never clock in but always share the monthly
     # BOH pool (pre-selected on the export roster)
     always_in_boh_pool: bool | None = None
+    # not a payroll employee at all — an admin login, a contractor. Keeps
+    # them off the payroll entry sheet without deactivating the record.
+    in_payroll: bool | None = None
 
 
 class SettingsPatch(BaseModel):
@@ -469,7 +472,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             r["id"]: {"display_name": r["display_name"], "pool_role": r["pool_role"],
                       "active": bool(r["active"]),
-                      "always_in_boh_pool": bool(r["always_in_boh_pool"])}
+                      "always_in_boh_pool": bool(r["always_in_boh_pool"]),
+                      "in_payroll": bool(r["in_payroll"])}
             for r in rows
         }
 
@@ -767,7 +771,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def list_employees(user: User, conn: DB, venue: Venue):
         links = employee_links(conn, venue["id"])
         rows = conn.execute(
-            "SELECT id, display_name, pool_role, active, always_in_boh_pool"
+            "SELECT id, display_name, pool_role, active, always_in_boh_pool,"
+            " in_payroll"
             " FROM employee WHERE venue_id = ?"
             " ORDER BY pool_role, display_name",
             (venue["id"],),
@@ -803,7 +808,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         audit(conn, venue["id"], admin["id"], "employee_created", "employee",
               cur.lastrowid, json.dumps(body.model_dump()))
         conn.commit()
-        return {"id": cur.lastrowid, **body.model_dump(), "active": True}
+        # read the row back rather than echoing the request: defaults set by
+        # the schema (active, in_payroll) belong in the response, and a
+        # hand-built dict silently drops every column added later
+        out = dict(conn.execute(
+            "SELECT id, display_name, pool_role, active, always_in_boh_pool,"
+            " in_payroll FROM employee WHERE id = ?", (cur.lastrowid,)).fetchone())
+        out["square_team_member_ids"] = employee_links(
+            conn, venue["id"]).get(cur.lastrowid, [])
+        out["square_team_member_id"] = (out["square_team_member_ids"][0]
+                                        if out["square_team_member_ids"] else None)
+        return out
 
     @app.patch("/api/employees/{employee_id}")
     def update_employee(employee_id: int, body: EmployeePatch, admin: Admin, conn: DB, venue: Venue):
@@ -853,7 +868,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               employee_id, json.dumps({"old": {k: row[k] for k in changes}, "new": changes}))
         conn.commit()
         out = dict(conn.execute(
-            "SELECT id, display_name, pool_role, active, always_in_boh_pool"
+            "SELECT id, display_name, pool_role, active, always_in_boh_pool,"
+            " in_payroll"
             " FROM employee WHERE id = ?", (employee_id,)).fetchone())
         out["square_team_member_ids"] = employee_links(conn, venue["id"]).get(employee_id, [])
         return out
@@ -1716,8 +1732,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return None
 
             payroll = []
+            # Someone marked off payroll who nonetheless earned is worth
+            # saying out loud — dropping their row silently would lose real
+            # money without anyone noticing.
+            off_payroll_with_pay = []
             for eid, emp in emps.items():
                 if not emp["active"] and eid not in per_emp and eid not in staff:
+                    continue
+                if not emp.get("in_payroll", True):
+                    s_ = staff.get(eid, {})
+                    earned = (s_.get("tips_cents", 0) + s_.get("event_cents", 0)
+                              + s_.get("gratuity_cents", 0))
+                    if earned or eid in per_emp:
+                        off_payroll_with_pay.append(emp["display_name"])
                     continue
                 lab = per_emp.get(eid)
                 s_ = staff.get(eid, {})
@@ -1748,6 +1775,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "salaried": bool(sal),
                 })
             payroll.sort(key=lambda r: r["name"])
+            totals["off_payroll_with_pay"] = sorted(off_payroll_with_pay)
 
         return {
             "start": start.isoformat(), "end": end.isoformat(),

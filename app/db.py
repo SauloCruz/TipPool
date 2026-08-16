@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Incremental migrations applied in order after the base schema.
 MIGRATIONS: dict[int, str] = {
@@ -101,6 +101,12 @@ MIGRATIONS: dict[int, str] = {
     AND NOT EXISTS (SELECT 1 FROM user WHERE super_admin = 1);
     INSERT OR IGNORE INTO user_venue_access (user_id, venue_id, role)
         SELECT id, venue_id, role FROM user;
+    """,
+    # M6: staff who are not on payroll at all — the point-of-sale allows an
+    # account that is not a payroll employee (an admin login, a contractor).
+    # Default 1: everyone existing stays on the payroll sheet.
+    8: """
+    ALTER TABLE employee ADD COLUMN in_payroll INTEGER NOT NULL DEFAULT 1;
     """,
 }
 
