@@ -2437,7 +2437,8 @@ async function renderPrintPayroll(anchorArg) {
                 tips_cents: 0, gross_pay_cents: 0 };
   for (const r of rows) {
     for (const k of Object.keys(tot)) tot[k] += r[k] || 0;
-    body.append(el("tr", {}, el("td", {}, esc(r.name)),
+    body.append(el("tr", {}, el("td", {}, esc(r.name),
+        r.blended_overtime ? el("span", { class: "flagmark" }, "\u2020") : null),
       el("td", { class: "num" }, hrs(r.regular_hours)),
       el("td", { class: "num" }, r.overtime_hours ? hrs(r.overtime_hours) : "—"),
       el("td", { class: "num" }, fmt(r.gratuity_cents)),
@@ -2463,7 +2464,12 @@ async function renderPrintPayroll(anchorArg) {
       el("th", { class: "num" }, "Gratuity"), el("th", { class: "num" }, "Tips"),
       el("th", { class: "num tot" }, "Gross pay"))), body),
     el("div", { class: "footnote" },
-      "Gratuity goes in the payroll form's additional-pay field; tips include "
+      (rows.some((r) => r.blended_overtime)
+        ? "\u2020 Overtime worked across two pay rates. The overtime rate is a "
+          + "blend of the two, and payroll decides exactly how — take the gross "
+          + "for these rows from payroll, not from here. Every other row is exact. "
+        : "")
+      + "Gratuity goes in the payroll form's additional-pay field; tips include "
       + "any event payout, which is paid as tips. Hours are paid hours from the "
       + "timecards, not the tippable hours the pool divides by — everyone who "
       + "worked is listed, including jobs that earn no tip share. Gross pay is "

@@ -125,51 +125,70 @@ def period_labor(entries, period_start: date, period_end: date,
     already split at midnight, covering the whole workweek around the period.
 
     Wages are a CROSS-CHECK, not a payroll authority — Square Payroll computes
-    what it actually pays. Two details were reverse-engineered from live pay
-    runs and matter to the cent:
+    what it actually pays. Details that matter to the cent:
 
     * hours are rounded to 2dp **before** multiplying, because that is the
       figure the payroll form shows and multiplies;
     * the result is rounded **up** to the cent. Half-up disagreed with a real
-      pay run by $0.01 (53.67 h x $21.30 = $1143.171 was paid as $1143.18).
+      pay run by $0.01 (53.67 h x $21.30 = $1143.171 was paid as $1143.18);
+    * overtime is priced as a half-time premium on the **regular rate of that
+      workweek** — straight-time earnings divided by hours worked, computed
+      per week, not across the period. For someone who works two jobs at
+      different rates the two differ, and the regular rate is a weekly
+      concept.
 
-    Overtime is priced as a half-time premium on top of the hours already
-    counted at base rate, so it is correct when someone worked two jobs at
-    different rates in the same week.
+    `blended_overtime` marks an employee whose overtime spans more than one
+    pay rate. Their wages are the closest we can get without knowing how the
+    payroll engine blends the rate, so a report can say to trust payroll for
+    that row rather than quietly showing a figure that is a few cents out.
     """
     from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 
     by_emp: dict[object, dict] = {}
     for who, d, hours, rate in entries:
-        e = by_emp.setdefault(who, {"paid": 0.0, "at_rate": defaultdict(float)})
+        e = by_emp.setdefault(who, {"weeks": defaultdict(list),
+                                    "at_rate": defaultdict(float), "paid": 0.0})
+        monday_offset = (d.weekday() - week_start) % 7
+        e["weeks"][d - timedelta(days=monday_offset)].append((d, hours, rate or 0))
         if period_start <= d <= period_end:
             e["paid"] += hours
             e["at_rate"][rate or 0] += hours
 
-    overtime = weekly_overtime_by_employee(
-        entries, period_start, period_end, week_start, threshold)
-
     out = {}
     for who, e in by_emp.items():
-        ot = overtime.get(who, 0.0)
+        overtime = 0.0
+        premium = Decimal(0)
+        for rows in e["weeks"].values():
+            week_hours = sum(h for _d, h, _r in rows)
+            if not week_hours:
+                continue
+            # the regular rate for THIS week, per FLSA
+            week_rate = Decimal(str(
+                sum(h * r for _d, h, r in rows) / week_hours))
+            running = ot_here = 0.0
+            for d, hours, _rate in sorted(rows):
+                before, running = running, running + hours
+                over = (max(0.0, running - threshold)
+                        - max(0.0, before - threshold))
+                if over and period_start <= d <= period_end:
+                    ot_here += over
+            overtime += ot_here
+            premium += (Decimal(str(round(ot_here, 2))) * Decimal("0.5")
+                        * week_rate / 100)
+
         base = Decimal(0)
-        paid_at_rate = 0.0
         for rate, hours in e["at_rate"].items():
             h2 = Decimal(str(hours)).quantize(Decimal("0.01"),
                                               rounding=ROUND_HALF_UP)
             base += h2 * Decimal(rate) / 100
-            paid_at_rate += hours * rate
-        # half-time premium: the base hour is already in `base` above
-        avg_rate = (paid_at_rate / e["paid"]) if e["paid"] else 0.0
-        premium = (Decimal(str(round(ot, 2))) * Decimal("0.5")
-                   * Decimal(str(avg_rate)) / 100)
         wages = (base + premium).quantize(Decimal("0.01"),
                                           rounding=ROUND_CEILING)
         out[who] = {
             "paid_hours": round(e["paid"], 2),
-            "overtime_hours": round(ot, 2),
-            "regular_hours": round(e["paid"] - ot, 2),
+            "overtime_hours": round(overtime, 2),
+            "regular_hours": round(e["paid"] - overtime, 2),
             "wages_cents": int(wages * 100),
+            "blended_overtime": overtime > 0 and len(e["at_rate"]) > 1,
         }
     return out
 

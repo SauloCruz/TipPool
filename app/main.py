@@ -1672,6 +1672,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "gratuity_cents": grat,
                     "tips_cents": tips,
                     "gross_pay_cents": lab["wages_cents"] + grat + tips,
+                    # overtime spanning two pay rates: the blended rate is the
+                    # payroll engine's to decide, so flag the row rather than
+                    # showing a figure that is quietly a few cents out
+                    "blended_overtime": lab["blended_overtime"],
                 })
             payroll.sort(key=lambda r: r["name"])
 

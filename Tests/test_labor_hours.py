@@ -126,3 +126,52 @@ class TestLaborHours:
     def test_unknown_dates_ride_along_so_a_report_can_refuse(self):
         lh = LaborHours(100.0, 0.0, ["2026-08-04"])
         assert lh.as_dict()["hours_unknown_dates"] == ["2026-08-04"]
+
+
+class TestBlendedOvertimeRate:
+    """Overtime is a half-time premium on the regular rate of THAT workweek —
+    straight-time earnings over hours worked, computed per week. For someone
+    holding two jobs at different rates the weekly rate and the period-wide
+    average differ, and using the period average was wrong (found against a
+    real pay run: a bartender/shift-lead was $0.73 out)."""
+
+    P0, P1 = date(2026, 8, 1), date(2026, 8, 15)
+
+    def test_one_rate_is_unaffected_by_which_average_is_used(self):
+        from engine import period_labor
+        entries = [("ana", date(2026, 8, 3 + i), 9.0, 2000) for i in range(5)]
+        got = period_labor(entries, self.P0, self.P1)["ana"]
+        assert got["overtime_hours"] == 5.0
+        assert got["wages_cents"] == 95000        # 40x20 + 5x30
+        assert got["blended_overtime"] is False
+
+    def test_the_premium_uses_that_weeks_rate_not_the_periods(self):
+        from engine import period_labor
+        # week 1 (Sun 8/2): 10 h at $20 — no overtime, cheap week
+        # week 2 (Sun 8/9): 42 h at $40 — 2 h over, expensive week
+        entries = ([("ana", date(2026, 8, 3), 10.0, 2000)]
+                   + [("ana", date(2026, 8, 10 + i), 10.5, 4000) for i in range(4)])
+        got = period_labor(entries, self.P0, self.P1)["ana"]
+        assert got["overtime_hours"] == 2.0
+        # straight time 10x20 + 42x40 = 1880; premium 2 x 0.5 x $40 (week 2's
+        # rate) = 40. A period-wide average of $36.19 would give only 36.19.
+        assert got["wages_cents"] == 192000
+        assert got["blended_overtime"] is True
+
+    def test_two_rates_inside_one_week_blend(self):
+        from engine import period_labor
+        # 21 h at $20 and 21 h at $30 in one week = 42 h, $1050 straight time
+        entries = [("ana", date(2026, 8, 3), 21.0, 2000),
+                   ("ana", date(2026, 8, 4), 21.0, 3000)]
+        got = period_labor(entries, self.P0, self.P1)["ana"]
+        assert got["overtime_hours"] == 2.0
+        # regular rate = 1050/42 = $25.00; premium = 2 x 0.5 x 25 = 25
+        assert got["wages_cents"] == 107500
+        assert got["blended_overtime"] is True
+
+    def test_the_flag_needs_both_overtime_and_two_rates(self):
+        from engine import period_labor
+        two_rates_no_ot = [("ana", date(2026, 8, 3), 8.0, 2000),
+                           ("ana", date(2026, 8, 4), 8.0, 3000)]
+        assert period_labor(two_rates_no_ot, self.P0, self.P1
+                            )["ana"]["blended_overtime"] is False
