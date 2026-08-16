@@ -599,3 +599,7 @@ td.tot, th.tot { font-weight: 700; }
 /* marks a payroll row whose overtime spans two pay rates */
 .flagmark { color: var(--warn, #d4a24e); font-weight: 700; margin-left: 3px; }
 .sheet .flagmark { color: #8a6d1f; }
+
+/* payroll rows with no timecards: present for line-by-line reading, but
+   visibly carrying no figures of their own */
+.sheet tr.quiet td { color: #6a6f78; }

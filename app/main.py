@@ -1658,24 +1658,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # wages, and leaving them off the sheet would under-pay a real
             # person. Event money rides in the tips column — the venue pays
             # it as tips (owner 2026-08-16).
+            # EVERY active employee gets a row, including people with nothing
+            # this period and salaried staff who never clock in at all. The
+            # sheet is read line by line against the payroll form, and a
+            # missing name is how you type someone's pay onto the wrong
+            # person (owner 2026-08-16).
             payroll = []
-            for eid, lab in per_emp.items():
+            for eid, emp in emps.items():
+                if not emp["active"] and eid not in per_emp and eid not in staff:
+                    continue
+                lab = per_emp.get(eid)
                 s_ = staff.get(eid, {})
                 tips = s_.get("tips_cents", 0) + s_.get("event_cents", 0)
                 grat = s_.get("gratuity_cents", 0)
+                wages = lab["wages_cents"] if lab else 0
                 payroll.append({
                     "employee_id": eid,
-                    "name": s_.get("name") or emps[eid]["display_name"],
-                    "regular_hours": lab["regular_hours"],
-                    "overtime_hours": lab["overtime_hours"],
-                    "wages_cents": lab["wages_cents"],
+                    "name": emp["display_name"],
+                    "regular_hours": lab["regular_hours"] if lab else 0.0,
+                    "overtime_hours": lab["overtime_hours"] if lab else 0.0,
+                    "wages_cents": wages,
                     "gratuity_cents": grat,
                     "tips_cents": tips,
-                    "gross_pay_cents": lab["wages_cents"] + grat + tips,
+                    "gross_pay_cents": wages + grat + tips,
                     # overtime spanning two pay rates: the blended rate is the
                     # payroll engine's to decide, so flag the row rather than
                     # showing a figure that is quietly a few cents out
-                    "blended_overtime": lab["blended_overtime"],
+                    "blended_overtime": bool(lab and lab["blended_overtime"]),
+                    # no timecards at all — salaried, or simply did not work.
+                    # Either way we have no wages for them and must not imply
+                    # their gross is zero.
+                    "no_timecards": lab is None,
                 })
             payroll.sort(key=lambda r: r["name"])
 

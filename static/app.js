@@ -2437,15 +2437,23 @@ async function renderPrintPayroll(anchorArg) {
                 tips_cents: 0, gross_pay_cents: 0 };
   for (const r of rows) {
     for (const k of Object.keys(tot)) tot[k] += r[k] || 0;
-    body.append(el("tr", {}, el("td", {}, esc(r.name),
-        r.blended_overtime ? el("span", { class: "flagmark" }, "\u2020") : null),
-      el("td", { class: "num" }, hrs(r.regular_hours)),
+    // No timecards means salaried or simply absent: show nothing rather than
+    // zeros, so the row cannot be misread as "this person is owed $0".
+    const blank = r.no_timecards;
+    body.append(el("tr", { class: blank ? "quiet" : "" },
+      el("td", {}, esc(r.name),
+        r.blended_overtime ? el("span", { class: "flagmark" }, "\u2020") : null,
+        blank ? el("span", { class: "flagmark" }, "\u2021") : null),
+      el("td", { class: "num" }, blank ? "—" : hrs(r.regular_hours)),
       el("td", { class: "num" }, r.overtime_hours ? hrs(r.overtime_hours) : "—"),
       el("td", { class: "num" }, fmt(r.gratuity_cents)),
       el("td", { class: "num" }, fmt(r.tips_cents)),
-      el("td", { class: "num tot" }, fmt(r.gross_pay_cents))));
+      el("td", { class: "num tot" },
+        blank && !r.gross_pay_cents ? "—" : fmt(r.gross_pay_cents))));
   }
-  body.append(el("tr", { class: "total" }, el("td", {}, `Total — ${rows.length} people`),
+  const worked = rows.filter((r) => !r.no_timecards).length;
+  body.append(el("tr", { class: "total" },
+    el("td", {}, `Total — ${rows.length} listed, ${worked} with hours`),
     el("td", { class: "num" }, hrs(tot.regular_hours)),
     el("td", { class: "num" }, hrs(tot.overtime_hours)),
     el("td", { class: "num" }, fmt(tot.gratuity_cents)),
@@ -2468,6 +2476,12 @@ async function renderPrintPayroll(anchorArg) {
         ? "\u2020 Overtime worked across two pay rates. The overtime rate is a "
           + "blend of the two, and payroll decides exactly how — take the gross "
           + "for these rows from payroll, not from here. Every other row is exact. "
+        : "")
+      + (rows.some((r) => r.no_timecards)
+        ? "\u2021 No timecards this period — salaried, or did not work. There "
+          + "are no hours or wages to report for them; a salaried figure comes "
+          + "from payroll. Listed so the sheet reads line for line against the "
+          + "payroll form. "
         : "")
       + "Gratuity goes in the payroll form's additional-pay field; tips include "
       + "any event payout, which is paid as tips. Hours are paid hours from the "

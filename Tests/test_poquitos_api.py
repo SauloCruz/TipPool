@@ -916,7 +916,7 @@ class TestPayrollEntrySheet:
         for absent in ("Points", "Days", "Event", "Wages"):
             assert f'"{absent}"' not in head, absent
         assert 'class: "total"' in fn          # the check-figure row
-        assert "rows.length} people" in fn
+        assert "rows.length} listed" in fn
         m = app_js.split("const routes = {")[1].split("};")[0]
         assert '"print-payroll": renderPrintPayroll' in m
         assert "Payroll entry sheet" in app_js
@@ -1018,3 +1018,60 @@ class TestLaborBackfill:
         # ...while the warning card still depends on there being a problem
         assert "if (miss.length) {" in fn
         assert "stay exactly as they are" in fn      # says what it will not touch
+
+
+class TestEveryEmployeeOnThePayrollSheet:
+    """Owner 2026-08-16: list every employee, even with nothing this period.
+    The sheet is read line by line against the payroll form, and a missing
+    name is how someone's pay gets typed onto the wrong person. Salaried
+    staff who never clock in (the venue has one) would otherwise never
+    appear at all."""
+
+    DAY = "2027-03-02"
+
+    def test_a_never_clocked_in_employee_still_gets_a_row(
+            self, client, poq, staff):
+        r = client.post("/api/employees", headers=poq["h"], json={
+            "display_name": "Salaried Sam", "pool_role": "BOH"})
+        assert r.status_code == 201, r.text
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Bartender",
+             "hourly_rate": {"amount": 2000, "currency": "USD"}},
+             "start_at": "2027-03-02T17:00:00-08:00",
+             "end_at": "2027-03-02T23:00:00-08:00",
+             "declared_cash_tip_money": money(0)}]
+        assert client.post(f"/api/days/{self.DAY}/pull",
+                           headers=poq["h"]).status_code == 200
+        inputs = client.get(f"/api/days/{self.DAY}", headers=poq["h"]).json()["inputs"]
+        inputs["credit_tips_cents"] = 20000
+        client.put(f"/api/days/{self.DAY}", headers=poq["h"], json=inputs)
+        client.post(f"/api/days/{self.DAY}/finalize", headers=poq["h"])
+
+        rows = {r["name"]: r for r in client.get(
+            f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()["payroll"]}
+        assert "Salaried Sam" in rows, "a salaried employee must still be listed"
+        sam = rows["Salaried Sam"]
+        assert sam["no_timecards"] is True
+        assert sam["regular_hours"] == 0.0
+        assert sam["wages_cents"] == 0        # we have no basis to invent one
+        assert sam["gross_pay_cents"] == 0
+
+    def test_everyone_who_worked_is_still_exact(self, client, poq, staff):
+        rows = {r["name"]: r for r in client.get(
+            f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()["payroll"]}
+        ana = rows["Ana"]
+        assert ana["no_timecards"] is False
+        assert ana["regular_hours"] == 6.0
+        assert ana["wages_cents"] == 12000     # 6 h at $20
+
+    def test_the_sheet_blanks_rather_than_zeroes_those_rows(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        fn = app_js.split("async function renderPrintPayroll(")[1].split(
+            "\n/* ---------- ")[0]
+        assert "const blank = r.no_timecards" in fn
+        assert 'blank ? "—" : hrs(r.regular_hours)' in fn
+        # and the footnote explains the mark rather than leaving a bare dagger
+        assert "salaried, or did not work" in fn
