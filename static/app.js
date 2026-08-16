@@ -2024,6 +2024,37 @@ async function renderExport(anchorArg) {
     location.hash = `#/print-stubs/${p.start}`;
   });
   const rowBtns = [dl, printSummaryBtn, stubsBtn];
+  // Days finalized before clock times were stored cannot report hours. This
+  // re-fetches only the timecards onto the stored pull — inputs and
+  // snapshots are untouched, so no locked payout can move.
+  if (p.model === "POINTS_HOURS" && (p.totals.hours_unknown_dates || []).length) {
+    const miss = p.totals.hours_unknown_dates;
+    const btn = el("button", { class: "ghost" }, "\u27F3 Fetch timecard data");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Fetching\u2026";
+      try {
+        const out = await api(`/api/periods/${p.start}/refresh-labor?scheme=${p.scheme}`,
+          { method: "POST" });
+        const bad = (out.failed || []).length;
+        toast(`${out.updated.length} day(s) updated`
+          + (bad ? `, ${bad} failed` : "") , !!bad);
+        route();
+      } catch (e) {
+        toast(e.message, true);
+        btn.disabled = false;
+        btn.textContent = "\u27F3 Fetch timecard data";
+      }
+    });
+    view.append(el("div", { class: "card" },
+      el("h2", {}, "Hours not available"),
+      el("div", { class: "note" },
+        `${miss.length} day(s) were finalized before timecard detail was stored, `
+        + "so paid hours, overtime and wages cannot be reported: "
+        + `${miss.join(", ")}. Fetching only re-reads the timecards — tips, `
+        + "gratuity and every finalized payout stay exactly as they are."),
+      el("div", { class: "row" }, btn)));
+  }
   if (p.model === "POINTS_HOURS") {
     const payrollBtn = el("button", { class: "ghost" }, "\u{1F5A8} Payroll entry sheet");
     payrollBtn.addEventListener("click", () => {

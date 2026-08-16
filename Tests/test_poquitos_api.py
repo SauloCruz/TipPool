@@ -920,3 +920,92 @@ class TestPayrollEntrySheet:
         m = app_js.split("const routes = {")[1].split("};")[0]
         assert '"print-payroll": renderPrintPayroll' in m
         assert "Payroll entry sheet" in app_js
+
+
+class TestLaborBackfill:
+    """Days finalized before clock times were stored cannot report hours.
+    Re-pulling them normally would mean reopening each day and recomputing
+    payouts from whatever Square says today, which can move a locked figure.
+    The backfill writes ONLY the extracted shifts onto the stored pull."""
+
+    DAY = "2027-01-05"
+
+    def _finalized_without_clock_times(self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Bartender",
+             "hourly_rate": {"amount": 2000, "currency": "USD"}},
+             "start_at": "2027-01-05T17:00:00-08:00",
+             "end_at": "2027-01-05T23:00:00-08:00",
+             "declared_cash_tip_money": money(0)},
+        ]
+        assert client.post(f"/api/days/{self.DAY}/pull",
+                           headers=poq["h"]).status_code == 200
+        inputs = client.get(f"/api/days/{self.DAY}", headers=poq["h"]).json()["inputs"]
+        inputs["credit_tips_cents"] = 30000
+        client.put(f"/api/days/{self.DAY}", headers=poq["h"], json=inputs)
+        assert client.post(f"/api/days/{self.DAY}/finalize",
+                           headers=poq["h"]).status_code == 200
+        # strip the clock times, reproducing a day finalized before they existed
+        import json as _json
+        from app.db import connect
+        conn = connect(os.environ["DB_PATH"])
+        row = conn.execute("SELECT id, square_json FROM day WHERE date = ?"
+                           " AND venue_id = ?", (self.DAY, 3)).fetchone()
+        rec = _json.loads(row["square_json"])
+        for sh in rec["raw"]["shifts"]:
+            sh.pop("start_at", None); sh.pop("end_at", None); sh.pop("rate_cents", None)
+        conn.execute("UPDATE day SET square_json = ? WHERE id = ?",
+                     (_json.dumps(rec), row["id"]))
+        conn.commit(); conn.close()
+
+    def test_backfill_restores_hours_without_touching_payouts(
+            self, client, poq, staff):
+        self._finalized_without_clock_times(client, poq, staff)
+        before = client.get(f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()
+        assert self.DAY in before["totals"]["hours_unknown_dates"]
+        assert before["totals"]["paid_hours"] == 0.0
+        locked = {e["name"]: e["tips_cents"] for e in before["employees"]}
+        assert locked, "the day should still have paid tips"
+
+        r = client.post(f"/api/periods/{self.DAY}/refresh-labor", headers=poq["h"])
+        assert r.status_code == 200, r.text
+        assert self.DAY in r.json()["updated"]
+
+        after = client.get(f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()
+        assert after["totals"]["hours_unknown_dates"] == []
+        assert after["totals"]["paid_hours"] == 6.0
+        # the whole point: every finalized payout is byte-identical
+        assert {e["name"]: e["tips_cents"] for e in after["employees"]} == locked
+        assert after["totals"]["total_tips_cents"] == before["totals"]["total_tips_cents"]
+
+    def test_the_day_stays_finalized(self, client, poq, staff):
+        d = client.get(f"/api/days/{self.DAY}", headers=poq["h"]).json()
+        assert d["status"] == "finalized"
+
+    def test_it_is_audit_logged(self, client, poq, staff):
+        log = client.get("/api/audit-log?limit=50", headers=poq["h"]).json()
+        entry = next(e for e in log if e["action"] == "labor_refreshed")
+        assert entry["entity_id"] == self.DAY
+
+    def test_days_never_pulled_are_skipped_not_invented(self, client, poq, staff):
+        r = client.post("/api/periods/2027-02-01/refresh-labor", headers=poq["h"])
+        assert r.status_code == 200
+        assert r.json()["updated"] == []
+        assert len(r.json()["skipped"]) > 0
+
+    def test_other_tip_models_are_refused(self, client):
+        v = {x["slug"]: x for x in client.get("/api/venues").json()}
+        r = client.post("/api/periods/2027-01-05/refresh-labor",
+                        headers={"X-Venue-Id": str(v["tavern-law"]["id"])})
+        assert r.status_code == 422
+
+    def test_the_export_screen_offers_it_only_when_hours_are_missing(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        fn = app_js.split("async function renderExport(")[1].split(
+            "\n/* ---------- ")[0]
+        assert 'hours_unknown_dates || []).length' in fn
+        assert "refresh-labor" in fn
+        assert "stay exactly as they are" in fn      # says what it will not touch

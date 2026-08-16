@@ -1149,6 +1149,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         audit(conn, venue["id"], user_id, "day_pulled", "day", d.isoformat(),
               json.dumps({"issues": [i["code"] for i in record["issues"]]}))
 
+    @app.post("/api/periods/{anchor}/refresh-labor")
+    def refresh_period_labor(anchor: str, admin: Admin, conn: DB, venue: Venue,
+                             scheme: str | None = None):
+        """Backfill clock times and hourly rates onto days already pulled.
+
+        Days finalized before those were stored carry no timecard detail, so
+        the payroll sheet cannot report their hours. Re-pulling normally would
+        mean reopening each day and recomputing its payouts from whatever
+        Square says today — which can move a locked figure if a timecard was
+        edited since. This writes ONLY the extracted shifts back onto the
+        stored pull: inputs are untouched, snapshots are untouched, so no
+        finalized payout can change. Safe on finalized days by construction.
+        """
+        if venue["tip_model"] != "POINTS_HOURS":
+            raise HTTPException(
+                422, "labor refresh is only available for points-and-hours venues")
+        start, end = period_for_scheme(parse_date(anchor),
+                                       resolve_scheme(venue, scheme))
+        client = get_square_client(venue)
+        updated, skipped, failed = [], [], []
+        for d in period_days(start, end):
+            row = day_row(conn, venue["id"], d)
+            if row is None or row["square_json"] is None:
+                skipped.append(d.isoformat())      # never pulled; nothing to enrich
+                continue
+            try:
+                shifts = sync.refresh_labor_shifts(conn, client, venue, d)
+            except SquareError as exc:
+                raise HTTPException(502, f"{d}: {exc}")
+            except Exception as exc:
+                log.exception("labor refresh failed for %s on %s", venue["slug"], d)
+                failed.append({"date": d.isoformat(),
+                               "error": f"{type(exc).__name__}: {exc}"})
+                continue
+            record = json.loads(row["square_json"])
+            raw = record.setdefault("raw", {})
+            before = raw.get("shifts") or []
+            raw["shifts"] = shifts
+            record["labor_refreshed_at"] = utcnow()
+            conn.execute(
+                "UPDATE day SET square_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(record), utcnow(), row["id"]),
+            )
+            audit(conn, venue["id"], admin["id"], "labor_refreshed", "day",
+                  d.isoformat(),
+                  json.dumps({"shifts_before": len(before),
+                              "shifts_after": len(shifts),
+                              "status": row["status"]}))
+            updated.append(d.isoformat())
+        conn.commit()
+        return {"updated": updated, "skipped": skipped, "failed": failed,
+                "start": start.isoformat(), "end": end.isoformat()}
+
     @app.post("/api/days/{date_str}/pull")
     def pull_day_from_square(date_str: str, user: User, conn: DB, venue: Venue):
         d = parse_date(date_str)

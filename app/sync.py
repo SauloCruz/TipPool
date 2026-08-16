@@ -261,3 +261,30 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
                        "timecards": len(timecards)},
         },
     }
+
+
+def refresh_labor_shifts(conn, client, venue, business_day: date) -> list[dict]:
+    """Re-fetch just the day's timecards and return the extracted shifts.
+
+    Used to backfill clock times and hourly rates onto days that were
+    finalized before those were stored. Deliberately narrower than
+    `pull_day`: it touches no money, so the caller can write the result onto
+    a FINALIZED day without any risk of moving a locked payout.
+    """
+    settings = settings_store.all_settings(conn, venue["id"])
+    start, end = business_day_bounds(
+        business_day, ZoneInfo(venue["timezone"]),
+        cutoff_minutes=settings["day_cutoff_minutes"],
+    )
+    timecards = client.search_timecards(start.isoformat(), end.isoformat())
+    emp_rows = conn.execute(
+        "SELECT l.team_member_id AS tmid, e.* FROM square_link l"
+        " JOIN employee e ON e.id = l.employee_id"
+        " WHERE l.venue_id = ?",
+        (venue["id"],),
+    ).fetchall()
+    labor = extract_timecards_poq(
+        timecards, {r["tmid"]: dict(r) for r in emp_rows}, venue["timezone"],
+        Decimal("0"), settings_store.poq_job_roles(settings),
+    )
+    return labor["shifts"]
