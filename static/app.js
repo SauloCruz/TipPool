@@ -1643,6 +1643,13 @@ async function renderDayPoq(dateArg) {
 /* ---------- period dashboard ---------- */
 
 
+/** What one person takes home across all three pools. Payroll still needs
+ *  tips and gratuity on separate lines (tips vs wages), but the total is what
+ *  the person is actually owed, so it belongs on every report. */
+function takeHome(s) {
+  return (s.tips_cents || 0) + (s.gratuity_cents || 0) + (s.event_cents || 0);
+}
+
 /** Discretionary tips (card + cash, before the processor's fee) as a share of
  *  net sales. Gratuity is excluded by default: it is contractual, not a
  *  reflection of service, so including it would blunt the signal. */
@@ -1872,6 +1879,7 @@ async function renderExport(anchorArg) {
       el("thead", {}, el("tr", {},
         el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
         el("th", { class: "num" }, "Event"), el("th", { class: "num" }, "Auto-grat"),
+        el("th", { class: "num" }, "Total"),
         el("th", { class: "num" }, "Days"), el("th", { class: "num" }, "Hrs"),
         el("th", { class: "num" }, "Pts"))),
       el("tbody", {}, p.employees.map((s) => el("tr", {},
@@ -1879,6 +1887,7 @@ async function renderExport(anchorArg) {
         el("td", { class: "num" }, fmt(s.tips_cents)),
         el("td", { class: "num" }, s.event_cents ? fmt(s.event_cents) : "—"),
         el("td", { class: "num" }, fmt(s.gratuity_cents)),
+        el("td", { class: "num tot" }, fmt(takeHome(s))),
         el("td", { class: "num" }, s.days),
         el("td", { class: "num" }, s.hours ? s.hours.toFixed(2) : "—"),
         el("td", { class: "num" }, s.points ? (+s.points.toFixed(4)).toString() : "—"))))));
@@ -2160,6 +2169,7 @@ async function renderPrintSummary(anchorArg) {
     : isPoq
     ? el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
         el("th", { class: "num" }, "Event"), el("th", { class: "num" }, "Gratuity"),
+        el("th", { class: "num" }, "Total"),
         el("th", { class: "num" }, "Days"), el("th", { class: "num" }, "Hours"),
         el("th", { class: "num" }, "Points"))
     : el("tr", {}, el("th", {}, "Employee"), el("th", { class: "num" }, "Tips"),
@@ -2179,6 +2189,7 @@ async function renderPrintSummary(anchorArg) {
           el("td", { class: "num" }, fmt(s.tips_cents)),
           el("td", { class: "num" }, s.event_cents ? fmt(s.event_cents) : "—"),
           el("td", { class: "num" }, fmt(s.gratuity_cents)),
+          el("td", { class: "num tot" }, fmt(takeHome(s))),
           el("td", { class: "num" }, s.days),
           el("td", { class: "num" }, s.hours ? s.hours.toFixed(2) : "—"),
           el("td", { class: "num" }, s.points ? (+s.points.toFixed(4)).toString() : "—"))

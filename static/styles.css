@@ -530,3 +530,7 @@ main.printpage { max-width: 820px; }
 
 /* second line on a pool tile (e.g. the sales base behind a percentage) */
 .pool .k2 { color: #6b6b74; font-size: .7rem; margin-top: 1px; }
+
+/* take-home column: the figure the person is actually owed */
+td.tot, th.tot { font-weight: 700; }
+.sheet td.tot { font-weight: 600; }

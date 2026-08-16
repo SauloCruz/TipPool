@@ -81,7 +81,7 @@ with:
   built too (compute_event_points_hours); three minor event rules remain open in
   that doc — do not invent them.
 - **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **443 tests**.
+  **445 tests**.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.
@@ -413,3 +413,4 @@ Ship M2 to real use before building M3 — it already beats the spreadsheet.
 | Tip rate refuses partial data (2026-08-15) | If ANY day in the period has tips but no net sales (finalized before sales capture existed), the rate is **not shown at all** — the tile and report say which dates need a re-pull. A short denominator overstates the rate (a live period read 18.11% instead of 16.97%), and a plausible wrong number is worse than none for a metric being trended. |
 | Poquitos hours rounding (2026-08-14) | Poquitos keeps hours **as Square reports them, 2 decimals, nearest** — NOT Tavern Law's round-up-to-0.05. Rounding up was inflating hours (~+0.26 h/day) and was the main reason Poquitos figures drifted from the venue's existing TipHaus numbers. `rounding_increment` stays a Tavern Law rule; `extract_timecards_poq` ignores it. |
 | Poquitos daily view columns (2026-08-14) | The distribution table shows **Tips, Grat, (Event), Total** plus a totals row, because tips/gratuity/event are three pools but take-home is the sum — and that sum is what another system reports as a single figure. |
+| Take-home column on exports (2026-08-15) | Every Poquitos period surface — period view, Export screen, print summary and payroll CSV — carries a **Take Home / Total** column (tips + event + auto-gratuity) alongside the separate pools. Payroll still needs tips and gratuity on distinct lines (different tax treatment), so the columns stay; the total is for the manager checking one number per person. Computed by one shared `takeHome()` helper in the frontend so the screens cannot drift. |

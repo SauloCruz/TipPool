@@ -1640,17 +1640,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # Points are the audit trail for the split: tips / points is the
             # value of one point, so any row can be checked by hand. Event
             # money is its own column — it comes from a different pool.
+            # Tips and gratuity stay separate columns — payroll needs them on
+            # different lines (tips vs wages) — but Take Home is what the
+            # person is actually owed, so it is there to check against.
             w.writerow(["Employee", "Tips (daily pool)", "Event Payout",
-                        "Tips Total", "Auto Gratuity (wages)",
+                        "Tips Total", "Auto Gratuity (wages)", "Take Home",
                         "Days Worked", "Hours", "Points"])
             for e in s["employees"]:
                 tips_total = e["tips_cents"] + e.get("event_cents", 0)
+                take_home = tips_total + e["gratuity_cents"]
                 w.writerow([
                     e["name"],
                     f"{e['tips_cents'] / 100:.2f}",
                     f"{e.get('event_cents', 0) / 100:.2f}",
                     f"{tips_total / 100:.2f}",
                     f"{e['gratuity_cents'] / 100:.2f}",
+                    f"{take_home / 100:.2f}",
                     e["days"],
                     f"{e['hours']:.2f}",
                     f"{e['points']:.4f}".rstrip("0").rstrip("."),

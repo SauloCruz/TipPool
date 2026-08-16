@@ -284,20 +284,27 @@ class TestPeriodAndExport:
         lines = r.text.strip().splitlines()
         cols = lines[0].split(",")
         assert cols == ["Employee", "Tips (daily pool)", "Event Payout",
-                        "Tips Total", "Auto Gratuity (wages)", "Days Worked",
-                        "Hours", "Points"]
+                        "Tips Total", "Auto Gratuity (wages)", "Take Home",
+                        "Days Worked", "Hours", "Points"]
+        # look columns up by NAME, so adding one never silently shifts a check
+        ix = {c: i for i, c in enumerate(cols)}
         rows = {l.split(",")[0]: l.split(",") for l in lines[1:]}
-        ana = rows["Ana"]
-        tips, points = float(ana[1]), float(ana[7])
+        get = lambda who, col: float(rows[who][ix[col]])
+        tips, points = get("Ana", "Tips (daily pool)"), get("Ana", "Points")
         # FOH pool $800 over 21 points (Ana 10 + Ben 8 + Dee 3) = $38.095/pt
         assert points == 10.0
         assert abs(tips - 380.95) < 0.01
         # the published points make the rate checkable by hand for everyone
         rate = tips / points
-        assert abs(float(rows["Ben"][1]) - rate * float(rows["Ben"][7])) < 0.01
-        assert abs(float(rows["Dee"][1]) - rate * float(rows["Dee"][7])) < 0.01
-        # tips total = daily + event
-        assert abs(float(ana[3]) - (tips + float(ana[2]))) < 0.01
+        for who in ("Ben", "Dee"):
+            assert abs(get(who, "Tips (daily pool)")
+                       - rate * get(who, "Points")) < 0.01, who
+        # tips total = daily + event; take home adds the gratuity line
+        assert abs(get("Ana", "Tips Total")
+                   - (tips + get("Ana", "Event Payout"))) < 0.01
+        assert abs(get("Ana", "Take Home")
+                   - (get("Ana", "Tips Total")
+                      + get("Ana", "Auto Gratuity (wages)"))) < 0.01
 
     def test_filename_is_venue_scoped(self, client, poq, staff):
         r = client.get(f"/api/periods/{self.P_DAY}/export.csv", headers=poq["h"])
@@ -510,3 +517,46 @@ class TestTipRateRefusesPartialData:
         assert "re-pull those days" in r.text
         # the true-but-partial figure must not appear
         assert "%" not in r.text.split("Average tip rate")[1].split("\n")[0]
+
+
+class TestTakeHomeColumn:
+    """Owner 2026-08-15: every report should show what each person is actually
+    owed, not just the component pools. Tips and gratuity stay separate — they
+    are different payroll lines — but the total sits alongside them."""
+
+    DAY = "2026-11-06"
+
+    def test_csv_carries_take_home(self, client, poq, staff):
+        client.put(f"/api/days/{self.DAY}", headers=poq["h"], json={
+            "credit_tips_cents": 100000, "auto_gratuity_cents": 20000,
+            "net_sales_cents": 500000,
+            "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 8},
+                       {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 8}]})
+        assert client.post(f"/api/days/{self.DAY}/finalize",
+                           headers=poq["h"]).status_code == 200
+        r = client.get(f"/api/periods/{self.DAY}/export.csv", headers=poq["h"])
+        lines = r.text.strip().splitlines()
+        head = lines[0].split(",")
+        assert "Take Home" in head
+        ti, gi, hi = (head.index("Tips Total"), head.index("Auto Gratuity (wages)"),
+                      head.index("Take Home"))
+        rows = [l.split(",") for l in lines[1:] if l and not l.startswith("Period totals")]
+        checked = 0
+        for row in rows:
+            if len(row) <= hi or not row[hi]:
+                continue
+            try:
+                tips, grat, take = float(row[ti]), float(row[gi]), float(row[hi])
+            except ValueError:
+                continue
+            assert round(tips + grat, 2) == take, row[0]
+            checked += 1
+        assert checked >= 2       # the server and the cook
+
+    def test_screens_show_the_same_total(self):
+        """Export screen and printable summary use one shared helper, so the
+        number cannot drift between them."""
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        assert "function takeHome(s)" in app_js
+        assert app_js.count("fmt(takeHome(s))") >= 2
