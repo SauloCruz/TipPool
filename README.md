@@ -154,7 +154,7 @@ Deliberately boring, in the best way:
 engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, POINTS_HOURS, clipping, labor hours)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
-Tests/      484 tests: golden days, engine properties, API contracts, sync, RBAC
+Tests/      488 tests: golden days, engine properties, API contracts, sync, RBAC
 ```
 
 Schema migrations are versioned and applied automatically at boot (currently **v7**).
@@ -272,6 +272,7 @@ Historical employee data in the public test fixtures is pseudonymized.
 
 - [x] **Printable period summary** — print/save-as-PDF report with signature line
 - [x] **IRS Form 4070 facsimiles** — per-employee monthly tip reports (tip-out venues)
+- [x] **Payroll entry sheet** — lean per-person hours/gratuity/tips/gross with a totals row
 - [x] **Take-home stubs** — a pay-envelope slip per employee, 3 or 4 to a page with a cut line
 - [x] **Retire the legacy Daily Review** — removed; the stepper is the only day screen
 - [x] **Local container smoke-test path** — Dockerfile, Compose, persistent test volume, health check

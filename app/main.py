@@ -1398,6 +1398,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             totals = {"total_tips_cents": 0, "boh_allocation_cents": 0,
                       "foh_pool_cents": 0, "auto_gratuity_cents": 0}
         staff: dict[int, dict] = {}
+        payroll: list[dict] = []
         draft_dates, flagged_dates = [], []
         days_missing_sales: list[str] = []
         # Hours on the clock, read off the day's stored shifts rather than the
@@ -1599,6 +1600,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     None if lab is None else
                     lab["wages_cents"] + s_["tips_cents"]
                     + s_["event_cents"] + s_["gratuity_cents"])
+            # Payroll covers everyone who worked, which is NOT everyone who
+            # earned: a manager's shift takes no tip share but still draws
+            # wages, and leaving them off the sheet would under-pay a real
+            # person. Event money rides in the tips column — the venue pays
+            # it as tips (owner 2026-08-16).
+            payroll = []
+            for eid, lab in per_emp.items():
+                s_ = staff.get(eid, {})
+                tips = s_.get("tips_cents", 0) + s_.get("event_cents", 0)
+                grat = s_.get("gratuity_cents", 0)
+                payroll.append({
+                    "employee_id": eid,
+                    "name": s_.get("name") or emps[eid]["display_name"],
+                    "regular_hours": lab["regular_hours"],
+                    "overtime_hours": lab["overtime_hours"],
+                    "wages_cents": lab["wages_cents"],
+                    "gratuity_cents": grat,
+                    "tips_cents": tips,
+                    "gross_pay_cents": lab["wages_cents"] + grat + tips,
+                })
+            payroll.sort(key=lambda r: r["name"])
 
         return {
             "start": start.isoformat(), "end": end.isoformat(),
@@ -1609,6 +1631,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "days": days_out,
             "totals": totals,
             "employees": sorted(staff.values(), key=lambda s: s["name"]),
+            # everyone who worked, tips or not — the payroll entry sheet
+            "payroll": payroll,
             "draft_dates": draft_dates,
             "flagged_dates": flagged_dates,
             "finalized_only": finalized_only,

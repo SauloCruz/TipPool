@@ -89,6 +89,7 @@ const routes = {
   "print-summary": renderPrintSummary,   // M4: printable/signable period report
   "print-4070": renderPrint4070,         // LF: Form 4070 facsimile per employee
   "print-stubs": renderPrintStubs,       // pay-envelope slip per employee
+  "print-payroll": renderPrintPayroll,   // lean sheet for keying into payroll
 };
 
 function renderDayDispatch(dateArg) {
@@ -2023,6 +2024,13 @@ async function renderExport(anchorArg) {
     location.hash = `#/print-stubs/${p.start}`;
   });
   const rowBtns = [dl, printSummaryBtn, stubsBtn];
+  if (p.model === "POINTS_HOURS") {
+    const payrollBtn = el("button", { class: "ghost" }, "\u{1F5A8} Payroll entry sheet");
+    payrollBtn.addEventListener("click", () => {
+      location.hash = `#/print-payroll/${p.start}`;
+    });
+    rowBtns.splice(2, 0, payrollBtn);
+  }
   if (p.model === "PERCENT_TIPOUT" && p.scheme === "monthly") {
     const f4070Btn = el("button", { class: "ghost" }, "🖨 Form 4070 (per employee)");
     f4070Btn.addEventListener("click", () => {
@@ -2365,6 +2373,65 @@ async function renderPrint4070(anchorArg) {
         + "Tip-outs received by support staff are shown as cash tips (paid in cash). "
         + "This facsimile is for record-keeping; verify filing requirements with your tax professional.")));
   }
+}
+
+async function renderPrintPayroll(anchorArg) {
+  // A deliberately thin sheet: only the columns the payroll form asks for,
+  // in the order it asks for them, with a totals row to check the entry
+  // against. The fuller tip-distribution summary lives on its own route.
+  const anchor = anchorArg || ME.today;
+  const saved = sessionStorage.getItem("reportScheme:" + sessionStorage.getItem("venueId"));
+  const p = await api(`/api/periods/${anchor}/export${saved ? `?scheme=${saved}` : ""}`);
+  view.append(printBar(`#/export/${anchor}`));
+  if (p.draft_dates.length) {
+    view.append(el("div", { class: "flag" },
+      `${p.draft_dates.length} day(s) not finalized and excluded: ${p.draft_dates.join(", ")}`));
+  }
+  const rows = p.payroll || [];
+  if (!rows.length) {
+    view.append(el("div", { class: "card" }, el("div", { class: "note" },
+      (p.totals.hours_unknown_dates || []).length
+        ? `No clock times stored for ${p.totals.hours_unknown_dates.join(", ")} — re-pull those days from Square.`
+        : "Nothing to report for this period yet.")));
+    return;
+  }
+
+  const body = el("tbody", {});
+  const tot = { regular_hours: 0, overtime_hours: 0, gratuity_cents: 0,
+                tips_cents: 0, gross_pay_cents: 0 };
+  for (const r of rows) {
+    for (const k of Object.keys(tot)) tot[k] += r[k] || 0;
+    body.append(el("tr", {}, el("td", {}, esc(r.name)),
+      el("td", { class: "num" }, hrs(r.regular_hours)),
+      el("td", { class: "num" }, r.overtime_hours ? hrs(r.overtime_hours) : "—"),
+      el("td", { class: "num" }, fmt(r.gratuity_cents)),
+      el("td", { class: "num" }, fmt(r.tips_cents)),
+      el("td", { class: "num tot" }, fmt(r.gross_pay_cents))));
+  }
+  body.append(el("tr", { class: "total" }, el("td", {}, `Total — ${rows.length} people`),
+    el("td", { class: "num" }, hrs(tot.regular_hours)),
+    el("td", { class: "num" }, hrs(tot.overtime_hours)),
+    el("td", { class: "num" }, fmt(tot.gratuity_cents)),
+    el("td", { class: "num" }, fmt(tot.tips_cents)),
+    el("td", { class: "num tot" }, fmt(tot.gross_pay_cents))));
+
+  view.append(el("div", { class: "sheet" },
+    el("div", { class: "sheethead" },
+      el("div", {}, el("h2", {}, `${p.venue.name} — Payroll Entry`),
+        el("div", { class: "subtle" },
+          `${SCHEME_LABEL[p.scheme] || p.scheme} · ${p.start} to ${p.end}`)),
+      el("div", { class: "subtle" }, `Generated ${new Date().toLocaleString()}`)),
+    el("table", {}, el("thead", {}, el("tr", {},
+      el("th", {}, "Employee"),
+      el("th", { class: "num" }, "Reg hrs"), el("th", { class: "num" }, "OT hrs"),
+      el("th", { class: "num" }, "Gratuity"), el("th", { class: "num" }, "Tips"),
+      el("th", { class: "num tot" }, "Gross pay"))), body),
+    el("div", { class: "footnote" },
+      "Gratuity goes in the payroll form's additional-pay field; tips include "
+      + "any event payout, which is paid as tips. Hours are paid hours from the "
+      + "timecards, not the tippable hours the pool divides by — everyone who "
+      + "worked is listed, including jobs that earn no tip share. Gross pay is "
+      + "a check figure; Square Payroll computes what is actually paid.")));
 }
 
 /* ---------- take-home stubs ----------

@@ -837,3 +837,86 @@ class TestPayrollSheet:
             assert col in poq_head, col
         # and the sheet says what the gross is and is not
         assert "Square Payroll computes what is actually paid" in summary
+
+
+class TestPayrollEntrySheet:
+    """Owner 2026-08-16: a thin sheet built for typing into the payroll form —
+    Reg hrs, OT hrs, Gratuity, Tips, Gross pay, in that order, with a totals
+    row to check the entry against. Event money rides in the Tips column
+    because the venue pays it as tips."""
+
+    DAY = "2026-12-02"
+
+    def _finalized_day(self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Bartender",
+             "hourly_rate": {"amount": 2130, "currency": "USD"}},
+             "start_at": "2026-12-02T16:00:00-08:00",
+             "end_at": "2026-12-03T00:00:00-08:00",
+             "declared_cash_tip_money": money(0)},
+            # a manager: earns no tip share, but is still owed wages
+            {"team_member_id": "TM_MGR", "wage": {"title": "Shift manager",
+             "hourly_rate": {"amount": 2500, "currency": "USD"}},
+             "start_at": "2026-12-02T15:00:00-08:00",
+             "end_at": "2026-12-02T23:00:00-08:00",
+             "declared_cash_tip_money": money(0)},
+        ]
+        assert client.post(f"/api/days/{self.DAY}/pull",
+                           headers=poq["h"]).status_code == 200
+        # keep the pulled shifts; a bare PUT would replace the whole input
+        inputs = client.get(f"/api/days/{self.DAY}", headers=poq["h"]).json()["inputs"]
+        inputs.update({"credit_tips_cents": 40000, "auto_gratuity_cents": 10000})
+        assert client.put(f"/api/days/{self.DAY}", headers=poq["h"],
+                          json=inputs).status_code == 200
+        assert client.post(f"/api/days/{self.DAY}/finalize",
+                           headers=poq["h"]).status_code == 200
+
+    def test_everyone_who_worked_is_listed_even_with_no_tips(
+            self, client, poq, staff):
+        """A manager's shift takes no tip share but still draws wages —
+        leaving them off would under-pay a real person."""
+        self._finalized_day(client, poq, staff)
+        p = client.get(f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()
+        names = {r["name"]: r for r in p["payroll"]}
+        assert "Mgr" in names, "the manager must be on the payroll sheet"
+        assert names["Mgr"]["tips_cents"] == 0
+        assert names["Mgr"]["gratuity_cents"] == 0
+        # 8 h at $25.00 and nothing else
+        assert names["Mgr"]["regular_hours"] == 8.0
+        assert names["Mgr"]["wages_cents"] == 20000
+        assert names["Mgr"]["gross_pay_cents"] == 20000
+        # but they are NOT in the tip-earner list
+        assert all(e["name"] != "Mgr" for e in p["employees"])
+
+    def test_event_money_rides_in_the_tips_column(self, client, poq, staff):
+        p = client.get(f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()
+        earner = {e["name"]: e for e in p["employees"]}["Ana"]
+        row = {r["name"]: r for r in p["payroll"]}["Ana"]
+        assert row["tips_cents"] == earner["tips_cents"] + earner["event_cents"]
+
+    def test_gross_is_wages_plus_gratuity_plus_tips(self, client, poq, staff):
+        p = client.get(f"/api/periods/{self.DAY}/export", headers=poq["h"]).json()
+        for r in p["payroll"]:
+            assert r["gross_pay_cents"] == (
+                r["wages_cents"] + r["gratuity_cents"] + r["tips_cents"]), r["name"]
+
+    def test_the_sheet_has_the_owners_column_order_and_a_totals_row(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        fn = app_js.split("async function renderPrintPayroll(")[1].split(
+            "\n/* ---------- ")[0]
+        head = fn.split('el("thead"')[1].split("body)")[0]
+        order = [c for c in ("Employee", "Reg hrs", "OT hrs", "Gratuity",
+                             "Tips", "Gross pay") if c in head]
+        assert order == ["Employee", "Reg hrs", "OT hrs", "Gratuity",
+                         "Tips", "Gross pay"], order
+        # nothing the payroll form does not ask for
+        for absent in ("Points", "Days", "Event", "Wages"):
+            assert f'"{absent}"' not in head, absent
+        assert 'class: "total"' in fn          # the check-figure row
+        assert "rows.length} people" in fn
+        m = app_js.split("const routes = {")[1].split("};")[0]
+        assert '"print-payroll": renderPrintPayroll' in m
+        assert "Payroll entry sheet" in app_js
