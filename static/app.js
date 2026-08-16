@@ -1672,6 +1672,12 @@ async function renderDayPoq(dateArg) {
 /** What one person takes home across all three pools. Payroll still needs
  *  tips and gratuity on separate lines (tips vs wages), but the total is what
  *  the person is actually owed, so it belongs on every report. */
+// hours, always 2dp — Square reports them the same way, so the two can be
+// compared without mental arithmetic
+function hrs(h) {
+  return (h || 0).toFixed(2);
+}
+
 function takeHome(s) {
   return (s.tips_cents || 0) + (s.gratuity_cents || 0) + (s.event_cents || 0);
 }
@@ -1707,7 +1713,13 @@ function poolTiles(t, model, missingDays = []) {
        [null, "Avg tip rate", pct(tipRate(t, { missingDays })),
         missingDays.length
           ? `needs re-pull: ${missingDays.join(", ")}`
-          : `on ${fmt(t.net_sales_cents || 0)} net sales`]]
+          : `on ${fmt(t.net_sales_cents || 0)} net sales`],
+       // every timecard, so this reconciles against Square's paid hours —
+       // the per-person column below counts only hours that earned a share
+       [null, "Hours on the clock", hrs(t.worked_hours),
+        t.excluded_hours
+          ? `${hrs(t.credited_hours)} earning · ${hrs(t.excluded_hours)} non-earning`
+          : `all ${hrs(t.credited_hours)} earning`]]
     : [[t.total_tips_cents, "Total tips"], [t.boh_allocation_cents, "Kitchen share"],
        [t.foh_pool_cents, "FOH pool"], [t.auto_gratuity_cents, "Auto-gratuity"]];
   return el("div", { class: "pools" },
@@ -2180,6 +2192,14 @@ async function renderPrintSummary(anchorArg) {
         el("tr", { class: "sub" }, el("td", {}, "· including auto-gratuity"),
           el("td", { class: "num" }, pct(tipRate(t, {
             withGratuity: true, missingDays: p.days_missing_sales })))),
+        el("tr", {}, el("td", {}, "Hours on the clock — all timecards"),
+          el("td", { class: "num" }, hrs(t.worked_hours))),
+        el("tr", { class: "sub" }, el("td", {}, "· earning a pool share"),
+          el("td", { class: "num" }, hrs(t.credited_hours))),
+        ...(t.excluded_hours ? [
+          el("tr", { class: "sub" }, el("td", {}, "· non-earning jobs"),
+            el("td", { class: "num" }, hrs(t.excluded_hours))),
+        ] : []),
       ] : [
         el("tr", {}, el("td", {}, "Kitchen share"), el("td", { class: "num" }, fmt(t.boh_allocation_cents || 0))),
         el("tr", {}, el("td", {}, "FOH pool"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),

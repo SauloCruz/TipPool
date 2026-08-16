@@ -660,3 +660,66 @@ class TestCashDeclarationBreakdown:
         css = (__import__("pathlib").Path(__file__).parent.parent
                / "static" / "styles.css").read_text()
         assert ".declarations" in css and ".decrow" in css
+
+
+class TestHoursOnTheClock:
+    """The per-person Hours column counts only hours that earned a pool
+    share, so it can never tie out against Square's paid-hours figure — an
+    EXCLUDED job (Shift manager, Owner) works real hours and earns nothing.
+    The period totals carry both numbers so the gap is visible, not a
+    mystery. Reporting only: hours never re-enter the payout math."""
+
+    DAY_A, DAY_B = "2026-10-16", "2026-10-17"
+
+    def _day(self, client, poq, staff, date, mgr_hours):
+        r = client.put(f"/api/days/{date}", headers=poq["h"], json={
+            "credit_tips_cents": 50000,
+            "shifts": [
+                {"employee_id": staff["Ana"], "role": "BARTENDER", "hours": 8},
+                {"employee_id": staff["Ben"], "role": "LINE_COOK", "hours": 6},
+                {"employee_id": staff["Mgr"], "role": "SHIFT_MANAGER",
+                 "hours": mgr_hours},
+            ]})
+        assert r.status_code == 200, r.text
+
+    def test_totals_split_earning_from_non_earning_hours(
+            self, client, poq, staff):
+        self._day(client, poq, staff, self.DAY_A, 5)
+        self._day(client, poq, staff, self.DAY_B, 4.5)
+        t = client.get(f"/api/periods/{self.DAY_A}",
+                       headers=poq["h"]).json()["totals"]
+        # 8 + 6 earning, 5 + 4.5 on the manager's excluded job
+        assert t["credited_hours"] == 28.0
+        assert t["excluded_hours"] == 9.5
+        assert t["worked_hours"] == 37.5
+        # the whole point: the two add up
+        assert t["worked_hours"] == t["credited_hours"] + t["excluded_hours"]
+
+    def test_worked_hours_come_from_the_shifts_not_the_payouts(
+            self, client, poq, staff):
+        """An excluded person never appears in a payout row, so reading
+        hours off the payouts would silently drop them."""
+        p = client.get(f"/api/periods/{self.DAY_A}", headers=poq["h"]).json()
+        assert all(e["name"] != "Mgr" for e in p["employees"])
+        assert p["totals"]["excluded_hours"] > 0
+
+    def test_hours_are_absent_for_other_tip_models(self, client):
+        v = {x["slug"]: x for x in client.get("/api/venues").json()}
+        h = {"X-Venue-Id": str(v["tavern-law"]["id"])}
+        t = client.get("/api/periods/2026-10-16", headers=h).json()["totals"]
+        assert "worked_hours" not in t     # POOL_HOURS clips to a window
+
+    def test_reports_show_both_figures(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        tiles = app_js.split("function poolTiles(")[1].split("\n}")[0]
+        assert "Hours on the clock" in tiles
+        assert "t.worked_hours" in tiles and "t.credited_hours" in tiles
+        assert "non-earning" in tiles
+        summary = app_js.split("async function renderPrintSummary(")[1].split(
+            "\nasync function ")[0]
+        assert "Hours on the clock — all timecards" in summary
+        assert "t.excluded_hours" in summary
+        # one shared formatter so the surfaces cannot render hours differently
+        assert "function hrs(h)" in app_js
+        assert app_js.count("hrs(t.worked_hours)") >= 2

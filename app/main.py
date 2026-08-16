@@ -1315,6 +1315,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         staff: dict[int, dict] = {}
         draft_dates, flagged_dates = [], []
         days_missing_sales: list[str] = []
+        # Hours on the clock, read off the day's stored shifts rather than the
+        # payout rows: an EXCLUDED job earns nothing so it never reaches a
+        # payout, but its hours are still hours and Square's labor dashboard
+        # counts them. Reporting only — never part of the payout math.
+        worked_hours = excluded_hours = 0.0
+        poq_role_side = {}
+        if is_poq:
+            poq_role_side = {r: (cfg or {}).get("side") for r, cfg in
+                             settings_store.get_setting(
+                                 conn, venue["id"], "poq_roles").items()}
 
         for d in period_days(start, end):
             key = d.isoformat()
@@ -1350,6 +1360,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if (outputs["totals"].get("total_tips_cents")
                         and not outputs["totals"].get("net_sales_cents")):
                     days_missing_sales.append(key)
+                for sh in json.loads(row["inputs_json"]).get("shifts", []):
+                    h = float(sh.get("hours") or 0)
+                    worked_hours += h
+                    if poq_role_side.get(sh.get("role")) == "EXCLUDED":
+                        excluded_hours += h
                 for line in outputs["people"]:
                     s_ = staff.setdefault(line["employee_id"], {
                         "employee_id": line["employee_id"], "name": line["name"],
@@ -1481,6 +1496,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 total_cash += cash
             totals["total_roundup_cents"] = total_roundup
             totals["total_cash_payout_cents"] = total_cash
+
+        if is_poq:
+            totals["worked_hours"] = round(worked_hours, 2)
+            totals["excluded_hours"] = round(excluded_hours, 2)
+            totals["credited_hours"] = round(
+                sum(s_["hours"] for s_ in staff.values()), 2)
 
         return {
             "start": start.isoformat(), "end": end.isoformat(),
