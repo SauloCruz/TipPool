@@ -114,7 +114,7 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
 
     food = extract_food_sales(orders, catalog_lookup, settings["category_map"])
     tips = extract_credit_tips(payments)
-    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"])
+    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"], payments)
     labor = extract_timecards(
         timecards, emp_by_tmid, business_day,
         settings_store.windows_by_weekday(settings), venue["timezone"],
@@ -158,7 +158,7 @@ def _pull_values_lf(payments, orders, timecards, emp_by_tmid,
     tippable-window clipping (M5 §3)."""
     tips = extract_server_tips(payments, emp_by_tmid)
     labor = extract_lf_timecards(timecards, emp_by_tmid)
-    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"])
+    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"], payments)
 
     issues = tips["issues"] + labor["issues"]
     # blocking issues from either source suppress all labor/tip fields
@@ -214,7 +214,7 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
     timecard carrying the Square job chosen at clock-in. No food sales — the
     pool is a straight 80/20 of tips, not a % of food."""
     tips = extract_credit_tips(payments)
-    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"])
+    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"], payments)
     labor = extract_timecards_poq(
         timecards, emp_by_tmid, venue["timezone"],
         # unused by this extractor: Poquitos keeps hours as Square reports

@@ -124,7 +124,8 @@ def extract_credit_tips(payments: list[dict]) -> dict:
 
 # ---------- service charges ----------
 
-def extract_auto_gratuity(orders: list[dict], grat_cfg: dict) -> dict:
+def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
+                         payments: list[dict] | None = None) -> dict:
     """Order service charges owed to staff as auto-gratuity.
 
     Matching (any of): Square's explicit `type == AUTO_GRATUITY` (catalog
@@ -136,7 +137,23 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict) -> dict:
     `total_money` includes sales tax and must NOT be distributed."""
     want_id = grat_cfg.get("catalog_object_id")
     want_name = (grat_cfg.get("name_contains") or "").lower()
+
+    # Refunds: money handed back is not owed to staff. Same split rule as
+    # tips — a refund eats the non-service-charge portion of the check first,
+    # so the charge is only refunded for the part exceeding it. A fully
+    # refunded check therefore returns its whole gratuity; a small partial
+    # refund returns none of it. (Matches Square's own Net Service Charges.)
+    refunded_by_order: dict[str, int] = {}
+    paid_by_order: dict[str, int] = {}
+    for p in payments or ():
+        oid = p.get("order_id")
+        if not oid:
+            continue
+        refunded_by_order[oid] = refunded_by_order.get(oid, 0) + _amount(p.get("refunded_money"))
+        paid_by_order[oid] = paid_by_order.get(oid, 0) + _amount(p.get("total_money"))
+
     total = 0
+    refunded_total = 0
     rows = []
     for order in orders:
         for sc in order.get("service_charges", []):
@@ -152,11 +169,19 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict) -> dict:
                 amt = _amount(applied)
             else:  # older payloads: strip tax from the total
                 amt = _amount(sc.get("total_money")) - _amount(sc.get("total_tax_money"))
-            total += amt
-            rows.append({"order_id": order.get("id"),
+            oid = order.get("id")
+            refunded = refunded_by_order.get(oid, 0)
+            back = 0
+            if refunded:
+                paid = paid_by_order.get(oid, 0)
+                back = min(amt, max(0, refunded - (paid - amt)))
+            total += amt - back
+            refunded_total += back
+            rows.append({"order_id": oid,
                          "name": sc.get("name") or sc.get("type") or "service charge",
-                         "cents": amt})
-    return {"auto_gratuity_cents": total, "charges": rows}
+                         "cents": amt - back, "refunded_cents": back})
+    return {"auto_gratuity_cents": total, "charges": rows,
+            "refunded_gratuity_cents": refunded_total}
 
 
 # ---------- timecards ----------

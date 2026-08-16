@@ -351,3 +351,61 @@ class TestInvalidTimecardInterval:
                      declared=1500),
         ])
         assert out["cash_tips_cents"] == 1500
+
+
+class TestRefundedServiceCharges:
+    """Money handed back is not owed to staff. A refund eats the non-charge
+    part of the check first, so a full refund returns the whole gratuity and a
+    small partial refund returns none — matching Square's Net Service Charges.
+    (2026-08-14: this was over-distributing $55.30 in one pay period.)"""
+
+    CFG = {"catalog_object_id": None, "name_contains": "gratuity"}
+
+    def sc_order(self, oid, cents):
+        return {"id": oid, "service_charges": [
+            {"type": "AUTO_GRATUITY", "applied_money": money(cents)}]}
+
+    def payment(self, oid, total, refunded):
+        return {"order_id": oid, "total_money": money(total),
+                "refunded_money": money(refunded)}
+
+    def test_fully_refunded_check_returns_its_whole_gratuity(self):
+        out = extract_auto_gratuity([self.sc_order("O1", 5530)], self.CFG,
+                                    [self.payment("O1", 36680, 36680)])
+        assert out["auto_gratuity_cents"] == 0
+        assert out["refunded_gratuity_cents"] == 5530
+
+    def test_small_partial_refund_leaves_the_gratuity_alone(self):
+        """The refund is absorbed by the food/drink portion first."""
+        out = extract_auto_gratuity([self.sc_order("O2", 6560)], self.CFG,
+                                    [self.payment("O2", 51512, 6000)])
+        assert out["auto_gratuity_cents"] == 6560
+        assert out["refunded_gratuity_cents"] == 0
+
+    def test_partial_refund_bigger_than_the_food_eats_into_it(self):
+        # check 100.00 of which 20.00 is gratuity; 90.00 refunded
+        # -> 10.00 of the gratuity comes back, 10.00 stays
+        out = extract_auto_gratuity([self.sc_order("O3", 2000)], self.CFG,
+                                    [self.payment("O3", 10000, 9000)])
+        assert out["auto_gratuity_cents"] == 1000
+        assert out["refunded_gratuity_cents"] == 1000
+
+    def test_no_refunds_behaves_exactly_as_before(self):
+        out = extract_auto_gratuity([self.sc_order("O4", 4200)], self.CFG,
+                                    [self.payment("O4", 20000, 0)])
+        assert out["auto_gratuity_cents"] == 4200
+        assert out["refunded_gratuity_cents"] == 0
+
+    def test_payments_argument_is_optional(self):
+        """Callers that don't pass payments keep the old behaviour."""
+        out = extract_auto_gratuity([self.sc_order("O5", 999)], self.CFG)
+        assert out["auto_gratuity_cents"] == 999
+
+    def test_real_period_shape(self):
+        """The 2026-08-01..14 case: one fully refunded check carrying 55.30
+        alongside a partially refunded one carrying 65.60."""
+        out = extract_auto_gratuity(
+            [self.sc_order("A", 5530), self.sc_order("B", 6560)], self.CFG,
+            [self.payment("A", 36680, 36680), self.payment("B", 51512, 6000)])
+        assert out["auto_gratuity_cents"] == 6560     # only B survives
+        assert out["refunded_gratuity_cents"] == 5530

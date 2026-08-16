@@ -1652,7 +1652,10 @@ function poolTiles(t, model) {
        [t.pool_host_cents, "Host pool"], [t.pool_boh_cents, "Kitchen (monthly)"],
        [t.auto_gratuity_cents, "Auto-gratuity"]]
     : model === "POINTS_HOURS"
-    ? [[t.total_tips_cents, "Total tips"], [t.foh_pool_cents, "FOH 80%"],
+    ? [[t.credit_tips_gross_cents, "Card tips (gross)"],
+       [t.cash_tips_cents, "Cash tips"],
+       [t.processing_fee_total_cents, "Processing fee"],
+       [t.total_tips_cents, "Pooled tips"], [t.foh_pool_cents, "FOH 80%"],
        [t.boh_pool_cents, "Kitchen 20%"], [t.auto_gratuity_cents, "Auto-gratuity"]]
     : [[t.total_tips_cents, "Total tips"], [t.boh_allocation_cents, "Kitchen share"],
        [t.foh_pool_cents, "FOH pool"], [t.auto_gratuity_cents, "Auto-gratuity"]];
@@ -2099,6 +2102,15 @@ async function renderPrintSummary(anchorArg) {
         el("tr", {}, el("td", {}, "Host pool"), el("td", { class: "num" }, fmt(t.pool_host_cents || 0))),
         el("tr", {}, el("td", {}, "Kitchen pool (monthly)"), el("td", { class: "num" }, fmt(t.pool_boh_cents || 0))),
       ] : isPoq ? [
+        // where the pooled money came from, so it can be checked line by line
+        // against Square's own card / cash / service-charge figures
+        el("tr", { class: "sub" }, el("td", {}, "· Card tips (gross)"),
+          el("td", { class: "num" }, fmt(t.credit_tips_gross_cents || 0))),
+        el("tr", { class: "sub" }, el("td", {}, "· Cash tips (declared)"),
+          el("td", { class: "num" }, fmt(t.cash_tips_cents || 0))),
+        el("tr", { class: "sub" }, el("td", {},
+            `· Card processing fee (${p.card_fee_pct || "0"}%, card tips + gratuity)`),
+          el("td", { class: "num" }, "−" + fmt(t.processing_fee_total_cents || 0))),
         el("tr", {}, el("td", {}, "Front of house (80%)"), el("td", { class: "num" }, fmt(t.foh_pool_cents || 0))),
         el("tr", {}, el("td", {}, "Kitchen (20%)"), el("td", { class: "num" }, fmt(t.boh_pool_cents || 0))),
       ] : [

@@ -524,3 +524,6 @@ main.printpage { max-width: 820px; }
   .ptable { overflow-x: auto; }
   .ptable .prow { min-width: 430px; }
 }
+
+/* sub-rows on the printable summary: components of the line above */
+.sheet tr.sub td { color: #555; font-size: .9em; padding-left: 18px; }

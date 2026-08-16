@@ -387,3 +387,55 @@ class TestPoquitosHoursAreNotRoundedUp:
         from decimal import Decimal
         from engine import round_hours_up
         assert round_hours_up(Decimal("3.3667"), Decimal("0.05")) == Decimal("3.40")
+
+
+class TestMoneySourceBreakdown:
+    """The owner reconciles against Square's own card / cash / service-charge
+    lines, so every total must show its components and the fee withheld."""
+
+    DAY = "2026-08-28"
+
+    def test_day_totals_split_card_cash_and_fee(self, client, poq, staff):
+        try:
+            client.put("/api/settings", headers=poq["h"],
+                       json={"poq_card_fee_pct": "2.2"})
+            out = client.put(f"/api/days/{self.DAY}", headers=poq["h"], json={
+                "credit_tips_cents": 100000, "cash_tips_cents": 5000,
+                "auto_gratuity_cents": 20000,
+                "shifts": [{"employee_id": staff["Ben"], "role": "SERVER", "hours": 8},
+                           {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 8}],
+            }).json()["computed"]
+            t = out["totals"]
+            assert t["credit_tips_gross_cents"] == 100000
+            assert t["card_fee_cents"] == 2200
+            assert t["credit_tips_net_cents"] == 97800
+            assert t["cash_tips_cents"] == 5000            # visible on its own
+            assert t["auto_gratuity_gross_cents"] == 20000
+            assert t["gratuity_fee_cents"] == 440
+            assert t["processing_fee_total_cents"] == 2640
+            # the components must reconcile to the pooled figure
+            assert t["credit_tips_net_cents"] + t["cash_tips_cents"] == t["total_tips_cents"]
+        finally:
+            client.put("/api/settings", headers=poq["h"],
+                       json={"poq_card_fee_pct": "0"})
+
+    def test_period_totals_carry_the_same_breakdown(self, client, poq, staff):
+        assert client.post(f"/api/days/{self.DAY}/finalize",
+                           headers=poq["h"]).status_code == 200
+        p = client.get(f"/api/periods/{self.DAY}", headers=poq["h"]).json()
+        t = p["totals"]
+        for key in ("credit_tips_gross_cents", "credit_tips_net_cents",
+                    "cash_tips_cents", "card_fee_cents",
+                    "auto_gratuity_gross_cents", "gratuity_fee_cents",
+                    "processing_fee_total_cents"):
+            assert key in t, key
+        assert p["card_fee_pct"] is not None      # so reports can label it
+
+    def test_csv_export_states_the_money_sources(self, client, poq):
+        r = client.get(f"/api/periods/{self.DAY}/export.csv", headers=poq["h"])
+        assert r.status_code == 200
+        body = r.text
+        for label in ("Period totals", "Card tips (gross)", "Cash tips (declared)",
+                      "Auto-gratuity (gross)", "Card processing fee",
+                      "Pooled tips (net)", "Kitchen (20%)"):
+            assert label in body, label

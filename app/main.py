@@ -1288,7 +1288,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                       "pool_boh_cents": 0}
         elif is_poq:
             totals = {"total_tips_cents": 0, "foh_pool_cents": 0,
-                      "boh_pool_cents": 0, "auto_gratuity_cents": 0}
+                      "boh_pool_cents": 0, "auto_gratuity_cents": 0,
+                      # so a period can be checked against Square's own
+                      # card / cash / service-charge lines
+                      "credit_tips_gross_cents": 0, "credit_tips_net_cents": 0,
+                      "cash_tips_cents": 0, "card_fee_cents": 0,
+                      "auto_gratuity_gross_cents": 0, "gratuity_fee_cents": 0,
+                      "processing_fee_total_cents": 0}
         else:
             totals = {"total_tips_cents": 0, "boh_allocation_cents": 0,
                       "foh_pool_cents": 0, "auto_gratuity_cents": 0}
@@ -1467,6 +1473,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "flagged_dates": flagged_dates,
             "finalized_only": finalized_only,
             "model": venue["tip_model"],
+            # the fee rate in force, so reports can label the deduction
+            "card_fee_pct": (settings_store.get_setting(
+                conn, venue["id"], "poq_card_fee_pct") if is_poq else None),
             "venue": {"id": venue["id"], "name": venue["name"],
                       "slug": venue["slug"]},
             "boh_monthly": boh_monthly,
@@ -1634,6 +1643,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     f"{e['hours']:.2f}",
                     f"{e['points']:.4f}".rstrip("0").rstrip("."),
                 ])
+            # Where the pooled money came from, so the CSV can be checked
+            # line-by-line against Square's own card / cash / service-charge
+            # figures without opening the app.
+            t = s["totals"]
+            w.writerow([])
+            w.writerow(["Period totals", "", "", "", "", "", "", ""])
+            for label, cents in [
+                ("Card tips (gross)", t.get("credit_tips_gross_cents", 0)),
+                ("Cash tips (declared)", t.get("cash_tips_cents", 0)),
+                ("Auto-gratuity (gross)", t.get("auto_gratuity_gross_cents", 0)),
+                (f"Card processing fee ({s.get('card_fee_pct') or '0'}% of card tips"
+                 " + gratuity)", -t.get("processing_fee_total_cents", 0)),
+                ("Pooled tips (net)", t.get("total_tips_cents", 0)),
+                ("Front of house (80%)", t.get("foh_pool_cents", 0)),
+                ("Kitchen (20%)", t.get("boh_pool_cents", 0)),
+                ("Auto-gratuity paid out (net)", t.get("auto_gratuity_cents", 0)),
+            ]:
+                w.writerow([label, f"{cents / 100:.2f}"])
         else:
             # "FOH Hours" stays hours actually worked (what payroll needs);
             # "Credited Hours" is the tip-weighted figure the split used, so a

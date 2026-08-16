@@ -408,6 +408,8 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
         "totals": {
             "credit_tips_gross_cents": day.credit_tips_gross_cents,
             "card_fee_cents": day.card_fee_cents,
+            "credit_tips_net_cents": day.credit_tips_gross_cents - day.card_fee_cents,
+            "cash_tips_cents": int(inputs["cash_tips_cents"]),
             "auto_gratuity_gross_cents": day.auto_gratuity_gross_cents,
             "gratuity_fee_cents": day.gratuity_fee_cents,
             "processing_fee_total_cents": day.card_fee_cents + day.gratuity_fee_cents,
