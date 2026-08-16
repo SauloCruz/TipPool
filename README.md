@@ -249,11 +249,13 @@ Historical employee data in the public test fixtures is pseudonymized.
 
 - [x] **Printable period summary** — print/save-as-PDF report with signature line
 - [x] **IRS Form 4070 facsimiles** — per-employee monthly tip reports (tip-out venues)
+- [x] **Take-home stubs** — a pay-envelope slip per employee, 3 or 4 to a page with a cut line
 - [x] **Retire the legacy Daily Review** — removed; the stepper is the only day screen
 - [x] **Local container smoke-test path** — Dockerfile, Compose, persistent test volume, health check
 - ~~**Historical importer**~~ — dropped: the app went live with real data, so back-loading spreadsheet history is unnecessary
 - [ ] **Hosted deployment** — the app is containerization-ready; hosting is config-only
 - [ ] Per-shift pooling and role-weighted points (modeled for, not built)
+- [ ] **Staff self-service view** — let employees look up their own take-home instead of printing stubs
 
 ## License
 
