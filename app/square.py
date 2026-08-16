@@ -138,6 +138,17 @@ class SquareClient:
     def list_categories(self) -> list[dict]:
         return self._paged_get("/v2/catalog/list", {"types": "CATEGORY"}, "objects")
 
+    def retrieve_wage_setting(self, team_member_id: str) -> dict:
+        """Pay type and rates for one team member.
+
+        Salaried staff never clock in, so a timecard pull cannot see them at
+        all — this is the only place their pay comes from. There is no bulk
+        endpoint, so callers fetch per member and cache the result.
+        """
+        data = self._request(
+            "GET", f"/v2/team-members/{team_member_id}/wage-setting")
+        return (data or {}).get("wage_setting") or {}
+
     def search_team_members(self) -> list[dict]:
         return self._paged_post("/v2/team-members/search", {
             "query": {"filter": {"location_ids": self.location_ids,

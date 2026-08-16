@@ -17,7 +17,7 @@ import logging
 import mimetypes
 import sqlite3
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
@@ -1301,11 +1301,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for m in members
         ]
         settings_store.put_setting(conn, venue["id"], "square_team_cache", cache, admin["id"])
+        # Pay type per member. Salaried staff never clock in, so without this
+        # they are invisible to every timecard-driven report. One call each —
+        # Square has no bulk wage-setting endpoint — and a failure on one
+        # member must not lose the whole sync.
+        wages = {}
+        for m in cache:
+            try:
+                ws = client.retrieve_wage_setting(m["id"])
+            except SquareError:
+                continue
+            job = next((j for j in (ws.get("job_assignments") or [])
+                        if j.get("pay_type") == "SALARY"), None)
+            if job is None:
+                continue
+            wages[m["id"]] = {
+                "pay_type": "SALARY",
+                "job_title": job.get("job_title"),
+                "hourly_rate_cents": (job.get("hourly_rate") or {}).get("amount"),
+                "annual_rate_cents": (job.get("annual_rate") or {}).get("amount"),
+                "weekly_hours": job.get("weekly_hours"),
+                "overtime_exempt": bool(ws.get("is_overtime_exempt")),
+            }
+        settings_store.put_setting(conn, venue["id"], "square_wage_settings",
+                                   wages, admin["id"])
         conn.commit()
         linked_ids = {r["team_member_id"] for r in conn.execute(
             "SELECT team_member_id FROM square_link WHERE venue_id = ?",
             (venue["id"],)).fetchall()}
-        return {"team": cache,
+        return {"team": cache, "salaried": len(wages),
                 "unlinked": [m for m in cache if m["id"] not in linked_ids]}
 
     # ---------- nightly sync ----------
@@ -1663,6 +1687,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # sheet is read line by line against the payroll form, and a
             # missing name is how you type someone's pay onto the wrong
             # person (owner 2026-08-16).
+            # Salaried staff never clock in, so no timecard-driven figure can
+            # ever reach them. Square converts the salary to the period's
+            # standard hours at the equivalent hourly rate — 40 h/wk over 24
+            # semi-monthly periods is 86.67 h — and that is what its payroll
+            # shows, so the sheet reproduces it rather than leaving a blank.
+            per_year = {"semimonthly": 24, "monthly": 12, "weekly": 52}[scheme]
+            wage_settings = settings_store.get_setting(
+                conn, venue["id"], "square_wage_settings")
+            tmids_by_emp: dict[int, list[str]] = {}
+            for r in conn.execute(
+                    "SELECT employee_id, team_member_id FROM square_link"
+                    " WHERE venue_id = ?", (venue["id"],)):
+                tmids_by_emp.setdefault(r["employee_id"], []).append(
+                    r["team_member_id"])
+
+            def salary_for(eid):
+                for tmid in tmids_by_emp.get(eid, []):
+                    ws = wage_settings.get(tmid)
+                    if not ws or not ws.get("hourly_rate_cents"):
+                        continue
+                    hours = round(float(ws.get("weekly_hours") or 0)
+                                  * 52 / per_year, 2)
+                    rate = Decimal(ws["hourly_rate_cents"])
+                    cents = int((Decimal(str(hours)) * rate).quantize(
+                        Decimal("1"), rounding=ROUND_CEILING))
+                    return hours, cents, ws
+                return None
+
             payroll = []
             for eid, emp in emps.items():
                 if not emp["active"] and eid not in per_emp and eid not in staff:
@@ -1672,15 +1724,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 tips = s_.get("tips_cents", 0) + s_.get("event_cents", 0)
                 grat = s_.get("gratuity_cents", 0)
                 wages = lab["wages_cents"] if lab else 0
+                sal = None if lab else salary_for(eid)
                 payroll.append({
                     "employee_id": eid,
                     "name": emp["display_name"],
-                    "regular_hours": lab["regular_hours"] if lab else 0.0,
+                    "regular_hours": (lab["regular_hours"] if lab
+                                      else (sal[0] if sal else 0.0)),
                     "overtime_hours": lab["overtime_hours"] if lab else 0.0,
-                    "wages_cents": wages,
+                    "wages_cents": sal[1] if sal else wages,
                     "gratuity_cents": grat,
                     "tips_cents": tips,
-                    "gross_pay_cents": wages + grat + tips,
+                    "gross_pay_cents": (sal[1] if sal else wages) + grat + tips,
                     # overtime spanning two pay rates: the blended rate is the
                     # payroll engine's to decide, so flag the row rather than
                     # showing a figure that is quietly a few cents out
@@ -1688,7 +1742,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # no timecards at all — salaried, or simply did not work.
                     # Either way we have no wages for them and must not imply
                     # their gross is zero.
-                    "no_timecards": lab is None,
+                    "no_timecards": lab is None and sal is None,
+                    # paid a salary, not from the clock: the hours shown are
+                    # the period's standard hours, not hours worked
+                    "salaried": bool(sal),
                 })
             payroll.sort(key=lambda r: r["name"])
 

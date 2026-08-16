@@ -48,6 +48,13 @@ class FakeSquare:
     def list_categories(self):
         return self.categories
 
+    # salaried staff are the only ones a timecard pull cannot see;
+    # the fake mirrors the real client so the sync path is exercised
+    wage_settings: dict = {}
+
+    def retrieve_wage_setting(self, team_member_id):
+        return self.wage_settings.get(team_member_id, {})
+
     def search_team_members(self):
         return self.team
 

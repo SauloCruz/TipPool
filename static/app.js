@@ -2443,7 +2443,8 @@ async function renderPrintPayroll(anchorArg) {
     body.append(el("tr", { class: blank ? "quiet" : "" },
       el("td", {}, esc(r.name),
         r.blended_overtime ? el("span", { class: "flagmark" }, "\u2020") : null,
-        blank ? el("span", { class: "flagmark" }, "\u2021") : null),
+        blank ? el("span", { class: "flagmark" }, "\u2021") : null,
+        r.salaried ? el("span", { class: "flagmark" }, "\u00A7") : null),
       el("td", { class: "num" }, blank ? "—" : hrs(r.regular_hours)),
       el("td", { class: "num" }, r.overtime_hours ? hrs(r.overtime_hours) : "—"),
       el("td", { class: "num" }, fmt(r.gratuity_cents)),
@@ -2476,6 +2477,11 @@ async function renderPrintPayroll(anchorArg) {
         ? "\u2020 Overtime worked across two pay rates. The overtime rate is a "
           + "blend of the two, and payroll decides exactly how — take the gross "
           + "for these rows from payroll, not from here. Every other row is exact. "
+        : "")
+      + (rows.some((r) => r.salaried)
+        ? "\u00A7 Salaried: the hours shown are the period's standard hours at "
+          + "the equivalent hourly rate, not hours worked — the same conversion "
+          + "payroll makes. "
         : "")
       + (rows.some((r) => r.no_timecards)
         ? "\u2021 No timecards this period — salaried, or did not work. There "

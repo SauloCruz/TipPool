@@ -114,6 +114,11 @@ DEFAULTS = {
     # against Square's own regular/overtime/paid figures. Verified against
     # 2026-08-01..15: Sunday weeks + 40h reproduce Square's 16.80 exactly.
     # Washington is weekly-only overtime; there is no daily rule here.
+    # Pay type per Square team member, cached by the team sync. Salaried
+    # staff never clock in, so this is the only record that they are paid at
+    # all. {team_member_id: {pay_type, hourly_rate_cents, annual_rate_cents,
+    # weekly_hours, job_title}}
+    "square_wage_settings": {},
     "poq_workweek_start": "SUN",
     "poq_overtime_after": "40",
 }

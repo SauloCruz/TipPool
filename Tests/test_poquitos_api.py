@@ -21,7 +21,14 @@ class FakePoqSquare:
     def search_timecards(self, b, e): return self.timecards
     def batch_retrieve_catalog(self, ids): return {"objects": [], "related_objects": []}
     def list_categories(self): return []
-    def search_team_members(self): return []
+    wage_settings: dict = {}
+
+    def retrieve_wage_setting(self, team_member_id):
+        return self.wage_settings.get(team_member_id, {})
+
+    team_members: list = []
+
+    def search_team_members(self): return self.team_members
 
 
 @pytest.fixture(scope="module")
@@ -1075,3 +1082,97 @@ class TestEveryEmployeeOnThePayrollSheet:
         assert 'blank ? "—" : hrs(r.regular_hours)' in fn
         # and the footnote explains the mark rather than leaving a bare dagger
         assert "salaried, or did not work" in fn
+
+
+class TestSalariedStaff:
+    """A salaried employee never clocks in, so no timecard-driven figure can
+    reach them — before this they were a blank row. Square converts the
+    salary to the period's standard hours at the equivalent hourly rate and
+    that is what its payroll shows, so the sheet reproduces it.
+
+    Pinned against the real 2026-08-01..15 run: a kitchen manager on
+    $91,000/yr, 40 h/wk, $43.75/h showed 86.67 h and $3,791.82."""
+
+    DAY = "2027-04-02"
+    TMID = "TM_SALARY"
+
+    def test_salary_converts_to_the_periods_standard_hours(
+            self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        fake.team_members = [{"id": self.TMID, "given_name": "Chef",
+                              "family_name": "Salary", "status": "ACTIVE"}]
+        fake.wage_settings = {self.TMID: {
+            "team_member_id": self.TMID,
+            "is_overtime_exempt": True,
+            "job_assignments": [{
+                "job_title": "Kitchen Manager", "pay_type": "SALARY",
+                "hourly_rate": {"amount": 4375, "currency": "USD"},
+                "annual_rate": {"amount": 9100000, "currency": "USD"},
+                "weekly_hours": 40}]}}
+        r = client.post("/api/employees", headers=poq["h"], json={
+            "display_name": "Chef Salary", "pool_role": "BOH",
+            "square_team_member_id": self.TMID})
+        assert r.status_code == 201, r.text
+        assert client.post("/api/square/sync-team",
+                           headers=poq["h"]).status_code == 200
+
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Bartender",
+             "hourly_rate": {"amount": 2000, "currency": "USD"}},
+             "start_at": "2027-04-02T17:00:00-07:00",
+             "end_at": "2027-04-02T23:00:00-07:00",
+             "declared_cash_tip_money": money(0)}]
+        client.post(f"/api/days/{self.DAY}/pull", headers=poq["h"])
+        inputs = client.get(f"/api/days/{self.DAY}", headers=poq["h"]).json()["inputs"]
+        inputs["credit_tips_cents"] = 20000
+        client.put(f"/api/days/{self.DAY}", headers=poq["h"], json=inputs)
+        client.post(f"/api/days/{self.DAY}/finalize", headers=poq["h"])
+
+        chef = {r["name"]: r for r in client.get(
+            f"/api/periods/{self.DAY}/export",
+            headers=poq["h"]).json()["payroll"]}["Chef Salary"]
+        # 40 h/wk x 52 / 24 semi-monthly periods = 86.666.. -> 86.67
+        assert chef["regular_hours"] == 86.67
+        assert chef["overtime_hours"] == 0.0
+        # 86.67 x 43.75 = 3791.8125, rounded up like every other wage figure
+        assert chef["wages_cents"] == 379182
+        assert chef["gross_pay_cents"] == 379182
+        assert chef["salaried"] is True
+        assert chef["no_timecards"] is False    # they ARE being paid
+
+    def test_the_sync_reports_how_many_are_salaried(self, client, poq):
+        out = client.post("/api/square/sync-team", headers=poq["h"]).json()
+        assert out["salaried"] == 1
+
+    def test_hourly_staff_are_untouched_by_the_wage_cache(self, client, poq):
+        rows = {r["name"]: r for r in client.get(
+            f"/api/periods/{self.DAY}/export",
+            headers=poq["h"]).json()["payroll"]}
+        assert rows["Ana"]["salaried"] is False
+        assert rows["Ana"]["regular_hours"] == 6.0
+        assert rows["Ana"]["wages_cents"] == 12000
+
+    def test_a_wage_setting_failure_does_not_lose_the_team_sync(
+            self, client, poq):
+        fake = client.app.state.square_client_factory()
+        original = fake.retrieve_wage_setting
+        from app.square import SquareError
+        def boom(tmid):
+            raise SquareError(500, "wage setting unavailable")
+        fake.retrieve_wage_setting = boom
+        try:
+            r = client.post("/api/square/sync-team", headers=poq["h"])
+            assert r.status_code == 200      # the team list still syncs
+            assert r.json()["salaried"] == 0
+        finally:
+            fake.retrieve_wage_setting = original
+            client.post("/api/square/sync-team", headers=poq["h"])
+
+    def test_the_sheet_marks_and_explains_the_conversion(self):
+        app_js = (__import__("pathlib").Path(__file__).parent.parent
+                  / "static" / "app.js").read_text()
+        fn = app_js.split("async function renderPrintPayroll(")[1].split(
+            "\n/* ---------- ")[0]
+        assert "r.salaried ?" in fn
+        assert "not hours worked" in fn
