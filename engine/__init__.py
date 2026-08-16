@@ -26,6 +26,7 @@ from .clipping import (
     round_hours_up,
 )
 from .payments import Payment, net_credit_tip_cents
+from .labor_hours import LaborHours, split_at_midnight, weekly_overtime
 from .points_hours import (
     DEFAULT_MANAGER_POOL_ROLES,
     DEFAULT_SUPPORT_GROUPS,
@@ -60,6 +61,9 @@ __all__ = [
     "business_day_bounds",
     "clip_timecard",
     "round_hours_up",
+    "LaborHours",
+    "split_at_midnight",
+    "weekly_overtime",
     "Payment",
     "net_credit_tip_cents",
     "DEFAULT_MANAGER_POOL_ROLES",

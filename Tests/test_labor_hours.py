@@ -1,0 +1,128 @@
+"""Regular/overtime hours — reporting only, never part of a payout.
+
+The two rules under test were derived by reconciling against Poquitos' live
+point-of-sale for 2026-08-01..15, where together they reproduce its regular
+1580.28 / overtime 16.80 / paid 1597.08 exactly. Neither rule is obvious and
+each is worth real money in a fortnight, so both are pinned here.
+"""
+
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from engine import LaborHours, split_at_midnight, weekly_overtime
+
+TZ = ZoneInfo("America/Los_Angeles")
+
+
+def dt(s):
+    return datetime.fromisoformat(s)
+
+
+class TestSplitAtMidnight:
+    def test_a_shift_inside_one_day_is_one_piece(self):
+        pieces = split_at_midnight(dt("2026-08-15T17:00:00-07:00"),
+                                   dt("2026-08-15T23:30:00-07:00"), TZ)
+        assert pieces == [(date(2026, 8, 15), 6.5)]
+
+    def test_a_shift_over_midnight_splits(self):
+        pieces = split_at_midnight(dt("2026-08-15T16:01:00-07:00"),
+                                   dt("2026-08-16T00:06:00-07:00"), TZ)
+        days = [d for d, _ in pieces]
+        assert days == [date(2026, 8, 15), date(2026, 8, 16)]
+        assert pieces[1][1] == pytest.approx(0.1, abs=1e-9)
+        assert sum(h for _, h in pieces) == pytest.approx(8 + 5 / 60)
+
+    def test_the_pieces_always_sum_to_the_shift(self):
+        total = sum(h for _, h in split_at_midnight(
+            dt("2026-08-14T22:00:00-07:00"),
+            dt("2026-08-17T03:30:00-07:00"), TZ))
+        assert total == pytest.approx(53.5)
+
+    def test_a_reversed_or_empty_interval_yields_nothing(self):
+        """A double-punch must not invent negative hours."""
+        assert split_at_midnight(dt("2026-08-15T20:00:00-07:00"),
+                                 dt("2026-08-15T20:00:00-07:00"), TZ) == []
+        assert split_at_midnight(dt("2026-08-15T21:00:00-07:00"),
+                                 dt("2026-08-15T20:00:00-07:00"), TZ) == []
+
+    def test_utc_input_is_converted_before_splitting(self):
+        """Square sends offsets; a naive UTC split would cut at 5 PM local."""
+        pieces = split_at_midnight(dt("2026-08-16T04:00:00+00:00"),
+                                   dt("2026-08-16T08:00:00+00:00"), TZ)
+        assert [d for d, _ in pieces] == [date(2026, 8, 15), date(2026, 8, 16)]
+
+    def test_a_dst_day_is_not_off_by_an_hour(self):
+        """2026-11-01 has 25 local hours; clocks go back at 2 AM."""
+        pieces = split_at_midnight(dt("2026-11-01T00:00:00-07:00"),
+                                   dt("2026-11-02T00:00:00-08:00"), TZ)
+        assert [d for d, _ in pieces] == [date(2026, 11, 1)]
+        assert pieces[0][1] == pytest.approx(25.0)
+
+
+class TestWeeklyOvertime:
+    P0, P1 = date(2026, 8, 1), date(2026, 8, 15)
+
+    def test_under_the_threshold_earns_none(self):
+        days = [("ana", date(2026, 8, 3 + i), 7.0) for i in range(5)]
+        assert weekly_overtime(days, self.P0, self.P1) == 0.0
+
+    def test_only_the_hours_past_forty_count(self):
+        days = [("ana", date(2026, 8, 3 + i), 9.0) for i in range(5)]  # 45
+        assert weekly_overtime(days, self.P0, self.P1) == pytest.approx(5.0)
+
+    def test_each_person_gets_their_own_forty(self):
+        days = [(who, date(2026, 8, 3 + i), 9.0)
+                for who in ("ana", "ben") for i in range(5)]
+        assert weekly_overtime(days, self.P0, self.P1) == pytest.approx(10.0)
+
+    def test_hours_before_the_period_still_count_toward_the_threshold(self):
+        """The week straddling the period start must be loaded whole —
+        otherwise the first week silently under-reports."""
+        # Sun 7/26 .. Sat 8/1, weeks start Sunday: 38 h before August, 6 on 8/1
+        days = [("ana", date(2026, 7, 27 + i), 9.5) for i in range(4)]
+        days.append(("ana", date(2026, 8, 1), 6.0))
+        # 44 h in the week; the 4 over the line fall on 8/1, inside the period
+        assert weekly_overtime(days, self.P0, self.P1) == pytest.approx(4.0)
+
+    def test_overtime_earned_before_the_period_stays_outside_it(self):
+        """The 4 h over the line on 7/30 belong to July. Everything worked
+        after the line is crossed is overtime, so 8/1's 2 h are ours."""
+        days = [("ana", date(2026, 7, 27 + i), 11.0) for i in range(4)]  # 44
+        days.append(("ana", date(2026, 8, 1), 2.0))
+        assert weekly_overtime(days, self.P0, self.P1) == pytest.approx(2.0)
+
+    def test_the_week_start_day_changes_the_answer(self):
+        """Sunday vs Monday weeks split the same hours differently — the
+        reason this is a setting and not a constant."""
+        days = [("ana", date(2026, 8, 2), 20.0),   # a Sunday
+                ("ana", date(2026, 8, 3), 25.0)]   # the Monday after
+        sunday = weekly_overtime(days, self.P0, self.P1, week_start=6)
+        monday = weekly_overtime(days, self.P0, self.P1, week_start=0)
+        assert sunday == pytest.approx(5.0)   # both days in one week: 45
+        assert monday == pytest.approx(0.0)   # split across two weeks
+
+    def test_a_custom_threshold_is_honoured(self):
+        days = [("ana", date(2026, 8, 3 + i), 8.0) for i in range(5)]
+        assert weekly_overtime(days, self.P0, self.P1,
+                               threshold=35.0) == pytest.approx(5.0)
+
+    def test_a_single_long_shift_is_split_at_the_line(self):
+        """Only the part of the crossing shift above 40 is overtime."""
+        days = [("ana", date(2026, 8, 3), 38.0), ("ana", date(2026, 8, 4), 6.0)]
+        assert weekly_overtime(days, self.P0, self.P1) == pytest.approx(4.0)
+
+
+class TestLaborHours:
+    def test_regular_is_the_remainder_and_the_parts_add_up(self):
+        lh = LaborHours(1597.08, 16.80, [])
+        assert lh.regular == 1580.28
+        d = lh.as_dict()
+        assert d["paid_hours"] == 1597.08
+        assert d["regular_hours"] + d["overtime_hours"] == pytest.approx(
+            d["paid_hours"])
+
+    def test_unknown_dates_ride_along_so_a_report_can_refuse(self):
+        lh = LaborHours(100.0, 0.0, ["2026-08-04"])
+        assert lh.as_dict()["hours_unknown_dates"] == ["2026-08-04"]

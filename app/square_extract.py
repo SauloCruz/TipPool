@@ -519,7 +519,8 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
             missing_clockout.append(emp["display_name"])
             shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
                            "role": role, "job_title": title, "hours": 0.0,
-                           "declared_cents": declared, "missing_clockout": True})
+                           "declared_cents": declared, "missing_clockout": True,
+                           "start_at": tc["start_at"]})
             continue
         t_in, t_out = _iso(tc["start_at"]), _iso(tc["end_at"])
         if t_out <= t_in:
@@ -528,7 +529,8 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
                 f"{t_out.astimezone(tz).strftime('%H:%M')})")
             shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
                            "role": role, "job_title": title, "hours": 0.0,
-                           "declared_cents": declared, "invalid_interval": True})
+                           "declared_cents": declared, "invalid_interval": True,
+                           "start_at": tc["start_at"], "end_at": tc["end_at"]})
             continue
 
         seconds = t_out.timestamp() - t_in.timestamp()
@@ -545,7 +547,11 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
             Decimal("0.01"), rounding=ROUND_HALF_UP)
         shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
                        "role": role, "job_title": title, "hours": float(hours),
-                       "declared_cents": declared})
+                       "declared_cents": declared,
+                       # clock times so period reports can split a shift at
+                       # midnight the way Square's labor day does, and run
+                       # weekly overtime across day boundaries
+                       "start_at": tc["start_at"], "end_at": tc["end_at"]})
 
     issues = []
     if unmapped_members:

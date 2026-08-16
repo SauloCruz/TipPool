@@ -663,11 +663,10 @@ class TestCashDeclarationBreakdown:
 
 
 class TestHoursOnTheClock:
-    """The per-person Hours column counts only hours that earned a pool
-    share, so it can never tie out against Square's paid-hours figure — an
-    EXCLUDED job (Shift manager, Owner) works real hours and earns nothing.
-    The period totals carry both numbers so the gap is visible, not a
-    mystery. Reporting only: hours never re-enter the payout math."""
+    """Two hour counts that are MEANT to differ. Tip-credited hours come from
+    the pool's shifts (whole shift on its business day, earning roles only).
+    Paid hours come from the clock times, split at local midnight, every job
+    — that is the only figure that reconciles against the point-of-sale."""
 
     DAY_A, DAY_B = "2026-10-16", "2026-10-17"
 
@@ -682,20 +681,15 @@ class TestHoursOnTheClock:
             ]})
         assert r.status_code == 200, r.text
 
-    def test_totals_split_earning_from_non_earning_hours(
-            self, client, poq, staff):
+    def test_credited_hours_exclude_non_earning_jobs(self, client, poq, staff):
         self._day(client, poq, staff, self.DAY_A, 5)
         self._day(client, poq, staff, self.DAY_B, 4.5)
         t = client.get(f"/api/periods/{self.DAY_A}",
                        headers=poq["h"]).json()["totals"]
-        # 8 + 6 earning, 5 + 4.5 on the manager's excluded job
-        assert t["credited_hours"] == 28.0
-        assert t["excluded_hours"] == 9.5
-        assert t["worked_hours"] == 37.5
-        # the whole point: the two add up
-        assert t["worked_hours"] == t["credited_hours"] + t["excluded_hours"]
+        assert t["credited_hours"] == 28.0      # 8 + 6, twice
+        assert t["excluded_hours"] == 9.5       # the manager's two shifts
 
-    def test_worked_hours_come_from_the_shifts_not_the_payouts(
+    def test_excluded_hours_come_from_shifts_not_payouts(
             self, client, poq, staff):
         """An excluded person never appears in a payout row, so reading
         hours off the payouts would silently drop them."""
@@ -703,23 +697,57 @@ class TestHoursOnTheClock:
         assert all(e["name"] != "Mgr" for e in p["employees"])
         assert p["totals"]["excluded_hours"] > 0
 
-    def test_hours_are_absent_for_other_tip_models(self, client):
-        v = {x["slug"]: x for x in client.get("/api/venues").json()}
-        h = {"X-Venue-Id": str(v["tavern-law"]["id"])}
-        t = client.get("/api/periods/2026-10-16", headers=h).json()["totals"]
-        assert "worked_hours" not in t     # POOL_HOURS clips to a window
+    def test_paid_hours_refuse_days_with_no_pull(self, client, poq, staff):
+        """Hand-entered days carry no clock times, so the period cannot be
+        reconciled — name the dates instead of reporting a short total."""
+        t = client.get(f"/api/periods/{self.DAY_A}",
+                       headers=poq["h"]).json()["totals"]
+        assert self.DAY_A in t["hours_unknown_dates"]
+        assert t["paid_hours"] == 0.0           # and the UI shows "—", not 0
+
+    def test_paid_hours_split_a_shift_at_midnight(self, client, poq, staff):
+        """The pool credits a 16:01→00:06 shift wholly to the night worked;
+        a labor report puts those 6 minutes on the next calendar day. On the
+        LAST night of a period that difference leaves the period entirely —
+        which is exactly why the two totals disagree."""
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Bartender"},
+             "start_at": "2026-11-30T16:01:00-08:00",
+             "end_at": "2026-12-01T00:06:00-08:00",
+             "declared_cash_tip_money": money(0)},
+        ]
+        assert client.post("/api/days/2026-11-30/pull",
+                           headers=poq["h"]).status_code == 200
+        t = client.get("/api/periods/2026-11-30",     # Nov 16-30
+                       headers=poq["h"]).json()["totals"]
+        # 8h05m total: 7h59m on Nov 30, 0h06m on Dec 1 — the next period
+        assert t["credited_hours"] == 8.08      # pool: the whole shift
+        assert t["paid_hours"] == 7.98          # labor: clipped at midnight
+        assert t["hours_unknown_dates"] == []
 
     def test_reports_show_both_figures(self):
         app_js = (__import__("pathlib").Path(__file__).parent.parent
                   / "static" / "app.js").read_text()
         tiles = app_js.split("function poolTiles(")[1].split("\n}")[0]
-        assert "Hours on the clock" in tiles
-        assert "t.worked_hours" in tiles and "t.credited_hours" in tiles
-        assert "non-earning" in tiles
+        assert "Paid hours" in tiles and "Tip-credited hours" in tiles
+        assert "t.overtime_hours" in tiles and "t.regular_hours" in tiles
+        # a period that cannot be reconciled shows no number at all
+        assert "needs re-pull" in tiles
         summary = app_js.split("async function renderPrintSummary(")[1].split(
             "\nasync function ")[0]
-        assert "Hours on the clock — all timecards" in summary
-        assert "t.excluded_hours" in summary
+        assert "t.paid_hours" in summary and "t.excluded_hours" in summary
         # one shared formatter so the surfaces cannot render hours differently
         assert "function hrs(h)" in app_js
-        assert app_js.count("hrs(t.worked_hours)") >= 2
+
+    def test_setup_exposes_the_two_overtime_settings(self, client, poq):
+        for body, expect in [({"poq_workweek_start": "MON"}, 200),
+                             ({"poq_workweek_start": "FUNDAY"}, 422),
+                             ({"poq_overtime_after": "40"}, 200),
+                             ({"poq_overtime_after": "0"}, 422),
+                             ({"poq_overtime_after": "nope"}, 422)]:
+            r = client.put("/api/settings", headers=poq["h"], json=body)
+            assert r.status_code == expect, (body, r.text)
+        client.put("/api/settings", headers=poq["h"],
+                   json={"poq_workweek_start": "SUN"})

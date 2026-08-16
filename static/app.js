@@ -1714,12 +1714,18 @@ function poolTiles(t, model, missingDays = []) {
         missingDays.length
           ? `needs re-pull: ${missingDays.join(", ")}`
           : `on ${fmt(t.net_sales_cents || 0)} net sales`],
-       // every timecard, so this reconciles against Square's paid hours —
-       // the per-person column below counts only hours that earned a share
-       [null, "Hours on the clock", hrs(t.worked_hours),
+       // two different hour counts, and they are meant to differ: paid hours
+       // are the point-of-sale's (every timecard, split at midnight), while
+       // credited hours are what the pool actually divided by
+       [null, "Paid hours",
+        (t.hours_unknown_dates || []).length ? "—" : hrs(t.paid_hours),
+        (t.hours_unknown_dates || []).length
+          ? `needs re-pull: ${t.hours_unknown_dates.join(", ")}`
+          : `${hrs(t.regular_hours)} regular · ${hrs(t.overtime_hours)} overtime`],
+       [null, "Tip-credited hours", hrs(t.credited_hours),
         t.excluded_hours
-          ? `${hrs(t.credited_hours)} earning · ${hrs(t.excluded_hours)} non-earning`
-          : `all ${hrs(t.credited_hours)} earning`]]
+          ? `${hrs(t.excluded_hours)} more on non-earning jobs`
+          : "every hour earned a share"]]
     : [[t.total_tips_cents, "Total tips"], [t.boh_allocation_cents, "Kitchen share"],
        [t.foh_pool_cents, "FOH pool"], [t.auto_gratuity_cents, "Auto-gratuity"]];
   return el("div", { class: "pools" },
@@ -2192,12 +2198,21 @@ async function renderPrintSummary(anchorArg) {
         el("tr", { class: "sub" }, el("td", {}, "· including auto-gratuity"),
           el("td", { class: "num" }, pct(tipRate(t, {
             withGratuity: true, missingDays: p.days_missing_sales })))),
-        el("tr", {}, el("td", {}, "Hours on the clock — all timecards"),
-          el("td", { class: "num" }, hrs(t.worked_hours))),
-        el("tr", { class: "sub" }, el("td", {}, "· earning a pool share"),
+        el("tr", {}, el("td", {}, (p.totals.hours_unknown_dates || []).length
+            ? `Paid hours — unavailable, no pull for ${t.hours_unknown_dates.join(", ")}`
+            : "Paid hours — every timecard"),
+          el("td", { class: "num" }, (t.hours_unknown_dates || []).length
+            ? "—" : hrs(t.paid_hours))),
+        ...((t.hours_unknown_dates || []).length ? [] : [
+          el("tr", { class: "sub" }, el("td", {}, "· regular"),
+            el("td", { class: "num" }, hrs(t.regular_hours))),
+          el("tr", { class: "sub" }, el("td", {}, "· overtime"),
+            el("td", { class: "num" }, hrs(t.overtime_hours))),
+        ]),
+        el("tr", {}, el("td", {}, "Tip-credited hours — earned a pool share"),
           el("td", { class: "num" }, hrs(t.credited_hours))),
         ...(t.excluded_hours ? [
-          el("tr", { class: "sub" }, el("td", {}, "· non-earning jobs"),
+          el("tr", { class: "sub" }, el("td", {}, "· non-earning jobs, excluded from the pool"),
             el("td", { class: "num" }, hrs(t.excluded_hours))),
         ] : []),
       ] : [
@@ -2709,6 +2724,46 @@ async function renderSettings() {
     view.append(mk("poq_foh_pct", s.poq_foh_pct ?? "80",
       "Front-of-house share",
       "Percent of pooled tips to FOH; the kitchen takes the exact remainder."));
+
+    /* overtime is REPORTING ONLY — it never moves a tip payout. These two
+       must mirror the venue's point-of-sale labor settings or the period
+       report will not reconcile against it. */
+    const wkSel = el("select", { style: "width:auto" },
+      ...[["SUN", "Sunday"], ["MON", "Monday"], ["TUE", "Tuesday"],
+          ["WED", "Wednesday"], ["THU", "Thursday"], ["FRI", "Friday"],
+          ["SAT", "Saturday"]].map(([v, label]) =>
+        el("option", { value: v,
+          ...((s.poq_workweek_start ?? "SUN") === v ? { selected: "" } : {}) },
+          label)));
+    wkSel.addEventListener("change", async () => {
+      try {
+        await api("/api/settings", { method: "PUT",
+          body: { poq_workweek_start: wkSel.value } });
+        toast("Workweek start saved");
+      } catch (e) { toast(e.message, true); }
+    });
+    const otInput = el("input", { type: "text", inputmode: "decimal",
+      value: s.poq_overtime_after ?? "40", style: "width:80px;text-align:right" });
+    otInput.addEventListener("blur", async () => {
+      const n = parseFloat(otInput.value.trim());
+      if (!Number.isFinite(n) || n <= 0) { toast("enter a number of hours", true); return; }
+      try {
+        await api("/api/settings", { method: "PUT",
+          body: { poq_overtime_after: otInput.value.trim() } });
+        toast("Overtime threshold saved");
+      } catch (e) { toast(e.message, true); }
+    });
+    view.append(el("div", { class: "card" },
+      el("h2", {}, "Overtime (reporting only)"),
+      el("div", { class: "note" },
+        "Used only to reconcile the period report against your point-of-sale's "
+        + "labor figures — overtime never changes a tip payout. Match these to "
+        + "the venue's payroll settings. Washington is weekly overtime only."),
+      el("div", { class: "row" },
+        el("span", { class: "hint", style: "flex:1" }, "Workweek starts on"), wkSel),
+      el("div", { class: "row" },
+        el("span", { class: "hint", style: "flex:1" }, "Overtime after"), otInput,
+        el("span", { class: "unit" }, "h/week"))));
   } else {
     /* --- POOL_HOURS: host/door tip credit per hour --- */
     const doorInput = el("input", { type: "text", inputmode: "decimal",

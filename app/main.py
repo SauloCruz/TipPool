@@ -16,7 +16,7 @@ import json
 import logging
 import mimetypes
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -27,6 +27,8 @@ from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Resp
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+
+import engine
 
 from . import auth as auth_mod
 from . import settings_store, sync
@@ -178,6 +180,32 @@ class SettingsPatch(BaseModel):
     # POINTS_HOURS: card processing fee withheld from credit tips before pooling
     poq_card_fee_pct: str | None = None
     poq_foh_pct: str | None = None
+    # POINTS_HOURS overtime, REPORTING ONLY — mirrors the venue's payroll
+    # settings so the period report reconciles; never enters a tip payout
+    poq_workweek_start: str | None = None
+    poq_overtime_after: str | None = None
+
+    @field_validator("poq_workweek_start")
+    @classmethod
+    def _weekday_valid(cls, v):
+        if v is None:
+            return v
+        if str(v).upper() not in settings_store.WEEKDAYS:
+            raise ValueError(f"must be one of {list(settings_store.WEEKDAYS)}")
+        return str(v).upper()
+
+    @field_validator("poq_overtime_after")
+    @classmethod
+    def _ot_threshold_valid(cls, v):
+        if v is None:
+            return v
+        try:
+            hours = float(str(v))
+        except ValueError:
+            raise ValueError("must be a number of hours, like 40")
+        if not 0 < hours <= 168:
+            raise ValueError("must be more than 0 and at most 168")
+        return str(v)
 
     @field_validator("poq_card_fee_pct", "poq_foh_pct")
     @classmethod
@@ -1282,6 +1310,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # "nearest round number (ending in zero)": 507.39 -> 510, 500 -> 500
         return -(-cents // 1000) * 1000
 
+    def labor_hours_for(conn, venue, start: date, end: date) -> engine.LaborHours:
+        """Worked and overtime hours for a period, for RECONCILIATION ONLY.
+
+        Reads the clock times off each day's stored Square pull rather than
+        the tip-pool inputs, because the two attribute a shift differently:
+        the pool credits a shift that ends at 00:06 to the night it belongs
+        to, while a labor report puts those six minutes on the next calendar
+        day. Only the latter reconciles against the point-of-sale.
+
+        Overtime is weekly, so the week straddling `start` has to be loaded
+        whole — hours worked before the period still count toward the
+        threshold. Days with no stored pull are named rather than treated as
+        zero: a short week would under-report overtime, and a plausible wrong
+        number is worse than none.
+        """
+        settings = settings_store.all_settings(conn, venue["id"])
+        tz = ZoneInfo(venue["timezone"])
+        week_start = settings_store.poq_workweek_start(settings)
+        threshold = float(settings.get("poq_overtime_after") or 40)
+
+        # back to the first day of the week containing `start`
+        lookback = start - timedelta(days=(start.weekday() - week_start) % 7)
+        rows = conn.execute(
+            "SELECT date, square_json FROM day"
+            " WHERE venue_id = ? AND date BETWEEN ? AND ? ORDER BY date",
+            (venue["id"], lookback.isoformat(), end.isoformat()),
+        ).fetchall()
+
+        day_hours, unknown = [], []
+        for r in rows:
+            shifts = ((json.loads(r["square_json"]).get("raw") or {}).get("shifts", [])
+                      if r["square_json"] else [])
+            timed = [sh for sh in shifts
+                     if sh.get("start_at") and sh.get("end_at")]
+            # A day that exists but carries no clock times cannot be reconciled:
+            # either it was hand-entered, or it was pulled before clock times
+            # were stored. A day with a pull and genuinely no timecards (venue
+            # closed) is known to be zero, not unknown. A date with no row at
+            # all never happened and is simply absent.
+            if not timed and (r["square_json"] is None or shifts):
+                if start.isoformat() <= r["date"] <= end.isoformat():
+                    unknown.append(r["date"])
+                continue
+            for sh in timed:
+                for d, h in engine.split_at_midnight(
+                        datetime.fromisoformat(sh["start_at"]),
+                        datetime.fromisoformat(sh["end_at"]), tz):
+                    day_hours.append((sh["employee_id"], d, h))
+        worked = sum(h for _, d, h in day_hours if start <= d <= end)
+        overtime = engine.weekly_overtime(
+            day_hours, start, end, week_start=week_start, threshold=threshold)
+        return engine.LaborHours(worked, overtime, unknown)
+
     def period_summary(conn, venue, anchor: date, finalized_only: bool,
                        scheme: str) -> dict:
         start, end = period_for_scheme(anchor, scheme)
@@ -1498,10 +1579,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             totals["total_cash_payout_cents"] = total_cash
 
         if is_poq:
-            totals["worked_hours"] = round(worked_hours, 2)
+            # from the tip-pool shifts: what earned a share, and what did not
             totals["excluded_hours"] = round(excluded_hours, 2)
             totals["credited_hours"] = round(
                 sum(s_["hours"] for s_ in staff.values()), 2)
+            # from the clock times: the point-of-sale's own labor figures
+            totals.update(labor_hours_for(conn, venue, start, end).as_dict())
 
         return {
             "start": start.isoformat(), "end": end.isoformat(),

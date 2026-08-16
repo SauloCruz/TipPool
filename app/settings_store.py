@@ -109,7 +109,16 @@ DEFAULTS = {
     # 2026-08-13). "0" = no deduction; set the venue's real processor rate in
     # Setup. Cash tips are never touched — no processor handles them.
     "poq_card_fee_pct": "0",
+    # Overtime, for REPORTING only — it never touches a tip payout. Mirrors
+    # the venue's Square labor settings so the period report reconciles
+    # against Square's own regular/overtime/paid figures. Verified against
+    # 2026-08-01..15: Sunday weeks + 40h reproduce Square's 16.80 exactly.
+    # Washington is weekly-only overtime; there is no daily rule here.
+    "poq_workweek_start": "SUN",
+    "poq_overtime_after": "40",
 }
+
+WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 
 
 
@@ -182,6 +191,11 @@ def poq_role_points(settings: dict) -> dict[str, Decimal]:
 
 def poq_role_side(settings: dict) -> dict[str, str]:
     return {r: v["side"] for r, v in settings["poq_roles"].items()}
+
+
+def poq_workweek_start(settings: dict) -> int:
+    """Python weekday index (Mon=0) the workweek begins on."""
+    return WEEKDAYS.index(str(settings.get("poq_workweek_start", "SUN")).upper())
 
 
 def poq_job_roles(settings: dict) -> dict[str, str]:
