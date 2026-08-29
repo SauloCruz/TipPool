@@ -318,12 +318,57 @@ EMPTY_INPUTS_POQ = {
     # private / special event on this day (0 pool = no event)
     "event_service_charge_cents": 0,
     "event_tips_cents": 0,
+    # how much of that arrived on a card — the processing fee is withheld from
+    # this part only. Events here are often invoiced (tender EXTERNAL), where
+    # a blanket fee would be wrong.
+    "event_card_cents": 0,
+    # inferred event window: top of the hour before the first order through
+    # the moment the ticket was paid (owner 2026-08-28). Display + provenance;
+    # the hours actually credited are the field below.
+    "event_start": None,
+    "event_end": None,
+    # Poquitos has no Event Bartender job, so the bartender on duty works the
+    # event on an ordinary Bartender clock-in (owner 2026-08-28). These hours
+    # move out of the daily pool into the event's service pool; the rest of
+    # their shift stays daily, so they earn from both.
+    "event_bartender_employee_id": None,
+    "event_bartender_hours": 0.0,
     # net sales (ex tax/tip/service charge) — reporting only, never paid out;
     # it is the denominator of the tip rate
     "net_sales_cents": 0,
 }
 
 EMPTY_INPUTS_BY_MODEL["POINTS_HOURS"] = EMPTY_INPUTS_POQ
+
+
+def _draft_event_bartender(shifts: list, inputs: dict) -> list:
+    """Move the drafted bartender's event hours onto an EVENT_BARTENDER shift.
+
+    Poquitos has no Event Bartender job in Square, so the bartender working a
+    private event is clocked in as an ordinary Bartender for the whole night.
+    The owner's rule (2026-08-28): they earn from BOTH pools — the hours that
+    overlap the event go to the event, the rest stay in the daily pool. Moving
+    the hours between roles is all that takes: EVENT_BARTENDER sits on the
+    EVENT side, which the daily engine already skips.
+    """
+    eid = inputs.get("event_bartender_employee_id")
+    hours = float(inputs.get("event_bartender_hours") or 0)
+    if not eid or hours <= 0:
+        return shifts
+    eid = str(int(eid))
+    out, moved = [], 0.0
+    for sh in shifts:
+        take = 0.0
+        if sh.employee == eid and sh.role == "BARTENDER" and moved < hours:
+            take = min(float(sh.hours), hours - moved)
+            moved += take
+        remaining = round(float(sh.hours) - take, 2)
+        if remaining > 0 or take == 0:
+            out.append(Shift(employee=sh.employee, role=sh.role, hours=remaining))
+    if moved > 0:
+        out.append(Shift(employee=eid, role="EVENT_BARTENDER",
+                         hours=round(moved, 2)))
+    return out
 
 
 def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
@@ -349,6 +394,8 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
     if problems:
         raise DayValidationError("; ".join(problems))
 
+    shifts = _draft_event_bartender(shifts, inputs)
+
     excluded = {str(eid) for eid, e in employees.items() if e["pool_role"] == "EXCLUDED"}
     try:
         day = compute_day_points_hours(
@@ -371,12 +418,26 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
             event_tips=_dollars(int(inputs.get("event_tips_cents") or 0)),
             shifts=shifts, role_points=role_points, role_side=role_side,
             foh_pct=Decimal(str(foh_pct)), support_pct=Decimal(str(support_pct)),
+            card_fee_pct=Decimal(str(card_fee_pct)),
+            card_pool=_dollars(min(int(inputs.get("event_card_cents") or 0),
+                                   event_pool_cents)),
         )
 
     def name(eid: str) -> str:
         return employees[int(eid)]["display_name"]
 
-    everyone = sorted(set(day.tips_payout_cents) | set(event.payout_cents if event else ()))
+    # Hours on the EVENT side are invisible to the daily result (it selects by
+    # side), so collect them here — otherwise an event server shows 0.00 h on
+    # the day screen and a drafted bartender appears to have worked a short
+    # night rather than a split one.
+    event_hours: dict[str, float] = {}
+    for sh in shifts:
+        if role_side.get(sh.role) == "EVENT":
+            event_hours[sh.employee] = round(
+                event_hours.get(sh.employee, 0.0) + float(sh.hours), 2)
+
+    everyone = sorted(set(day.tips_payout_cents) | set(event.payout_cents if event else ())
+                      | set(event_hours))
     people = sorted(
         (
             {
@@ -384,6 +445,7 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
                 "name": name(eid),
                 "side": day.side.get(eid, "EVENT"),
                 "hours": day.hours.get(eid, 0.0),
+                "event_hours": event_hours.get(eid, 0.0),
                 "points": day.points.get(eid, 0.0),
                 "tips_cents": day.tips_payout_cents.get(eid, 0),
                 "gratuity_cents": day.gratuity_payout_cents.get(eid, 0),
@@ -421,6 +483,10 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
             "foh_pool_cents": day.foh_pool_cents,
             "boh_pool_cents": day.boh_pool_cents,
             "auto_gratuity_cents": day.auto_gratuity_cents,
+            # the event pool net of its own card fee — a fourth money line
+            # beside tips and gratuity, so a period can total it separately
+            "event_pool_cents": event.pool_cents if event else 0,
+            "event_fee_cents": event.card_fee_cents if event else 0,
             "foh_points_total": day.foh_points_total,
             "boh_points_total": day.boh_points_total,
         },
@@ -431,6 +497,8 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
     out["flags"]["event_staff_without_event_money"] = bool(event_staff)
     if event:
         out["event"] = {
+            "gross_cents": event.gross_cents,
+            "card_fee_cents": event.card_fee_cents,
             "pool_cents": event.pool_cents,
             "foh_portion_cents": event.foh_portion_cents,
             "boh_portion_cents": event.boh_portion_cents,

@@ -99,6 +99,18 @@ function renderDayDispatch(dateArg) {
   return renderDay(dateArg);
 }
 
+/* The date input is an invisible overlay on the heading, which nobody finds.
+   This is the visible way in — it matters most when jumping from the end of
+   one period to the start of another, where the arrows are a long walk. */
+function datePickButton(datePick) {
+  const b = el("button", { class: "ghost small", type: "button",
+                           title: "Jump to a date" }, "🗓");
+  b.addEventListener("click", () => {
+    try { datePick.showPicker(); } catch { datePick.focus(); }
+  });
+  return b;
+}
+
 const ISSUE_TEXT = {
   unmapped_category: (d) =>
     `Unmapped Square categories: ${Object.values(d).join(", ")}. Map them in Setup, then pull again — food sales are blocked until then.`,
@@ -117,6 +129,34 @@ const ISSUE_TEXT = {
   unattributed_tips: (d) =>
     `${fmt(d.cents)} in card tips have no server attached — assign them or mark house before finalizing.`,
   role_mismatch: (d) => `Role mismatch (assigned role wins): ${d.join("; ")}`,
+  pick_event_bartender: (d) =>
+    `More than one bartender was on during the event (${d.join(", ")}). Pick the one who worked it under Private event — the app will not guess.`,
+  no_event_bartender: () =>
+    "An event ran but no bartender's shift overlapped it — check the event times if a bartender should share the event pool.",
+};
+
+/* POINTS_HOURS day flags. Each one asks the manager for a decision — none of
+   them means the arithmetic is wrong — so the day screen spells them out and
+   offers to mark them reviewed, which clears the ⚠ on the period screen. */
+const POQ_FLAG_TEXT = {
+  no_foh_worked:
+    "Tips were pooled but nobody worked a front-of-house job — the 80% has nowhere to go.",
+  no_boh_worked:
+    "Tips were pooled but nobody worked a kitchen job — the 20% has nowhere to go. It is NOT handed to FOH.",
+  negative_tips: "Pooled tips came out negative — check the refunds.",
+  negative_gratuity: "Auto-gratuity came out negative — check the refunds.",
+  event_staff_without_event_money:
+    "Someone clocked in on an event job but no event money is entered.",
+  event_no_busser_worked:
+    "No busser worked: their 3% of the event's FOH portion stayed with the event's own staff.",
+  event_no_expo_worked:
+    "No expo or food runner worked: their 3% of the event's FOH portion stayed with the event's own staff.",
+  event_no_host_worked:
+    "No host worked: their 3% of the event's FOH portion stayed with the event's own staff.",
+  event_no_event_service_staff:
+    "Event money is entered but nobody clocked in on an event job, and no bartender is drafted — the service pool has nobody to pay.",
+  event_no_boh_worked:
+    "The event's 20% kitchen portion has nobody to pay — no kitchen hours that day.",
 };
 
 const LF_INFO_FLAGS = new Set(["no_host_resplit"]);
@@ -968,10 +1008,17 @@ async function renderDayLF(dateArg) {
     d.setDate(d.getDate() + days);
     location.hash = `#/day/${d.toISOString().slice(0, 10)}`;
   };
+  const datePick = el("input", { type: "date", value: dateStr,
+    style: "position:absolute;width:0;height:0;opacity:0;pointer-events:none" });
+  datePick.addEventListener("change", () => {
+    if (datePick.value) location.hash = `#/day/${datePick.value}`;
+  });
   view.append(el("div", { class: "row spread", style: "margin:6px 2px 12px" },
-    el("div", {}, el("h1", { style: "margin:0" }, nice), caption),
+    el("div", { style: "position:relative" },
+      el("h1", { style: "margin:0" }, nice), caption, datePick),
     el("div", { class: "row" },
       el("button", { class: "ghost small", onclick: () => shift(-1) }, "‹"),
+      datePickButton(datePick),
       el("button", { class: "ghost small", onclick: () => shift(1) }, "›"),
       el("span", { class: `badge ${day.status}` }, day.status.replace("_", " ")))));
 
@@ -1352,6 +1399,11 @@ async function renderDayPoq(dateArg) {
 
   const moneyEls = {};
   let shiftRows = (inputs.shifts || []).map((s) => ({ ...s }));
+  // Poquitos has no Event Bartender job, so the bartender on duty covers an
+  // event on an ordinary Bartender clock-in. The pull drafts them when only
+  // one bartender overlapped the event; with several the manager says which.
+  const eventBartender = { id: inputs.event_bartender_employee_id ?? null,
+                           hours: inputs.event_bartender_hours || 0 };
 
   function collectInputs() {
     return {
@@ -1360,6 +1412,11 @@ async function renderDayPoq(dateArg) {
       auto_gratuity_cents: centsFromInput(moneyEls.auto_gratuity_cents),
       event_service_charge_cents: centsFromInput(moneyEls.event_service_charge_cents),
       event_tips_cents: centsFromInput(moneyEls.event_tips_cents),
+      event_card_cents: inputs.event_card_cents || 0,
+      event_start: inputs.event_start || null,
+      event_end: inputs.event_end || null,
+      event_bartender_employee_id: eventBartender.id,
+      event_bartender_hours: eventBartender.hours,
       shifts: shiftRows.filter((s) => s.hours > 0 || s.role)
         .map((s) => ({ employee_id: s.employee_id, role: s.role, hours: s.hours })),
     };
@@ -1412,6 +1469,7 @@ async function renderDayPoq(dateArg) {
         `${ME.venue.name} · 80/20 points pool`)),
     el("div", { class: "row" },
       el("button", { class: "ghost small", onclick: () => shift(-1) }, "‹"),
+      datePickButton(datePick),
       el("button", { class: "ghost small", onclick: () => shift(1) }, "›"),
       el("span", { class: `badge ${day.status}` }, day.status.replace("_", " ")))));
 
@@ -1488,7 +1546,12 @@ async function renderDayPoq(dateArg) {
       const meta = roles[s.role] || {};
       const pts = parseFloat(meta.points ?? 0);
       const side = meta.side || "?";
-      const credited = +(pts * (s.hours || 0)).toFixed(4);
+      // hours drafted onto the event leave the daily pool, so say so here —
+      // otherwise this row's points disagree with the distribution table
+      const onEvent = (String(eventBartender.id) === String(s.employee_id)
+                       && s.role === "BARTENDER") ? (eventBartender.hours || 0) : 0;
+      const dailyHours = Math.max(0, +((s.hours || 0) - onEvent).toFixed(2));
+      const credited = +(pts * dailyHours).toFixed(4);
       const hoursInp = el("input", { inputmode: "decimal", type: "text",
         value: String(s.hours ?? 0), style: "width:70px;text-align:right",
         ...(finalized ? { disabled: "" } : {}) });
@@ -1504,7 +1567,8 @@ async function renderDayPoq(dateArg) {
             el("span", { class: `rolechip ${side.toLowerCase()}` }, s.role.replace(/_/g, " "))),
           el("div", { class: "sub" },
             side === "EXCLUDED" ? "Not in the pool"
-              : `${pts} pt/h · ${credited} points`)),
+              : `${pts} pt/h · ${credited} points`
+                + (onEvent ? ` · ${onEvent.toFixed(2)} h on the event` : ""))),
         el("div", { class: "row", style: "flex:none;gap:6px" },
           hoursInp, el("span", { class: "unit" }, "h"))));
     }
@@ -1523,18 +1587,108 @@ async function renderDayPoq(dateArg) {
     inp.addEventListener("input", scheduleSave);
     eventCard.append(el("label", {}, label), el("div", { class: "money" }, inp));
   }
+  const barBox = el("div", {});
+  eventCard.append(barBox);
   eventCard.append(el("div", { class: "hint", style: "margin-top:8px" },
     "Leave at 0 unless a private event ran. Event staff are whoever clocked in "
     + "under an event job; support roles are tipped out 3% each from the FOH portion."));
   view.append(el("div", { class: "seclabel" }, "Private event (optional)"), eventCard);
+
+  const hhmm = (iso) => iso
+    ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : "";
+
+  /* Flags are prompts, not errors: the day screen names each one and offers
+     to mark them reviewed, which clears the ⚠ on the period screen. Marking
+     records the flag NAMES, so a new flag appearing later re-raises the mark. */
+  let ackedFlags = day.acked_flags || [];
+  function drawFlags() {
+    flagBox.textContent = "";
+    const on = Object.entries(computed?.flags || {})
+      .filter(([, v]) => v).map(([k]) => k).sort();
+    if (!on.length) return;
+    const unreviewed = on.filter((f) => !ackedFlags.includes(f));
+    for (const f of on) {
+      let text = POQ_FLAG_TEXT[f] || f;
+      if (f === "event_staff_without_event_money") {
+        const who = (computed.event_staff_unpaid || []).join(", ");
+        text = `${who} clocked in on an event job, but no event money is `
+          + "entered. They are out of the daily pool, so they would be paid "
+          + "nothing — enter the event's service charge and tips, or fix the "
+          + "clock-in.";
+      }
+      flagBox.append(el("div", { class: "flag" },
+        el("span", {}, ackedFlags.includes(f) ? "✓ " : "⚠ "), el("span", {}, text)));
+    }
+    const btn = el("button", { class: "small ghost", type: "button" },
+      unreviewed.length ? "Mark reviewed — clear the ⚠" : "Reviewed · undo");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const updated = await api(`/api/days/${dateStr}/ack-flags`,
+          { method: "POST", body: { flags: unreviewed.length ? on : [] } });
+        ackedFlags = updated.acked_flags || [];
+        toast(unreviewed.length ? "Marked reviewed" : "Review cleared");
+        drawFlags();
+      } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    });
+    flagBox.append(el("div", { style: "margin:6px 0 4px" }, btn));
+  }
+
+  function drawEventBartender() {
+    barBox.textContent = "";
+    if (!inputs.event_start) return;
+    barBox.append(el("div", { class: "hint", style: "margin-bottom:6px" },
+      `Event ran ${hhmm(inputs.event_start)}–${hhmm(inputs.event_end)}, `
+      + "read off the event ticket (opened → paid)."));
+    // candidates = anyone who clocked in as a bartender today; the event hours
+    // move to the event pool and the rest of the shift stays daily, so the
+    // bartender earns from both (owner 2026-08-28)
+    const bartenders = shiftRows.filter((r) => r.role === "BARTENDER");
+    if (!bartenders.length) return;
+    const sel = el("select", finalized ? { disabled: "" } : {});
+    sel.append(el("option", { value: "" }, "— nobody —"));
+    for (const b of bartenders) {
+      const nm = (byId[b.employee_id] || {}).display_name || `#${b.employee_id}`;
+      sel.append(el("option", {
+        value: String(b.employee_id),
+        ...(String(eventBartender.id) === String(b.employee_id) ? { selected: "" } : {}),
+      }, nm));
+    }
+    const hrs = el("input", { inputmode: "decimal", type: "text",
+      value: (eventBartender.hours || 0).toFixed(2),
+      style: "width:70px;text-align:right",
+      ...(finalized ? { disabled: "" } : {}) });
+    sel.addEventListener("change", () => {
+      eventBartender.id = sel.value ? Number(sel.value) : null;
+      if (!sel.value) { eventBartender.hours = 0; hrs.value = "0.00"; }
+      scheduleSave();
+    });
+    hrs.addEventListener("input", () => {
+      eventBartender.hours = Math.max(0, Number(hrs.value) || 0);
+      scheduleSave();
+    });
+    hrs.addEventListener("blur", () => { hrs.value = (eventBartender.hours || 0).toFixed(2); });
+    barBox.append(el("label", {}, "Bartender who worked the event"),
+      el("div", { class: "row", style: "gap:8px;align-items:center" },
+        sel, hrs, el("span", { class: "unit" }, "h")));
+    if (bartenders.length > 1 && eventBartender.id == null) {
+      barBox.append(el("div", { class: "flag" },
+        `${bartenders.length} bartenders were on tonight — say which one worked `
+        + "the event. Their event hours come out of the daily pool and go to "
+        + "the event's; the rest of the shift stays daily."));
+    }
+  }
 
   /* ---- computed ---- */
   const feeBox = el("div", {});
   const poolsBox = el("div", { class: "pools" });
   const tableBox = el("div", { class: "ptable" });
   const eventBox = el("div", {});
+  const eventTableBox = el("div", {});
+  const flagBox = el("div", {});
   view.append(el("div", { class: "seclabel" }, "Distribution"), feeBox, poolsBox,
-              eventBox, tableBox);
+              eventBox, flagBox, tableBox, eventTableBox);
 
   function refreshAll() {
     issuesBox.textContent = "";
@@ -1563,59 +1717,96 @@ async function renderDayPoq(dateArg) {
     }
 
     eventBox.textContent = "";
-    if (computed?.flags?.event_staff_without_event_money) {
-      const who = (computed.event_staff_unpaid || []).join(", ");
-      eventBox.append(el("div", { class: "flag" },
-        `${who} clocked in on an event job, but no event money is entered. `
-        + "They are out of the daily pool, so they would be paid nothing — "
-        + "enter the event's service charge and tips below, or fix the clock-in."));
-    }
     if (computed?.event) {
       const e = computed.event;
       const groups = Object.entries(e.support_group_cents || {})
         .map(([g, c]) => `${g.toLowerCase()} ${fmt(c)}`).join(" · ");
+      const feeNote = e.card_fee_cents
+        ? ` (${fmt(e.gross_cents)} less ${fmt(e.card_fee_cents)} card fee)` : "";
       eventBox.append(el("div", { class: "flag" },
-        `Event pool ${fmt(e.pool_cents)} — FOH ${fmt(e.foh_portion_cents)}, `
+        `Event pool ${fmt(e.pool_cents)}${feeNote} — FOH ${fmt(e.foh_portion_cents)}, `
         + `kitchen ${fmt(e.boh_portion_cents)}. Support tip-outs: ${groups}. `
         + `Event service staff share ${fmt(e.service_pool_cents)}.`));
     }
 
     tableBox.textContent = "";
     const people = computed?.people || [];
-    // Tips, gratuity and event money are three separate pools, but what a
-    // person actually takes home is the sum — and that is the figure to
-    // compare against another system's single "take home" number.
-    const anyEvent = people.some((p) => p.event_cents);
     const take = (p) => p.tips_cents + p.gratuity_cents + (p.event_cents || 0);
+    // The daily pool and the event pool are separate distributions with
+    // different members, so they get separate tables: an event server has no
+    // daily points and would otherwise sit in the daily table as a row of
+    // zeroes. People who worked both appear in both, and the take-home list
+    // below adds them up — that last figure is what gets handed out.
+    const daily = people.filter((p) => p.points || p.hours
+                                       || p.tips_cents || p.gratuity_cents);
+    const eventPeople = people.filter((p) => p.event_cents);
+
     tableBox.append(el("div", { class: "prow phead" },
       el("span", { class: "cname" }, "Name"), el("span", { class: "chrs" }, "Pts"),
       el("span", { class: "ctips" }, "Tips"), el("span", { class: "cgrat" }, "Grat"),
-      ...(anyEvent ? [el("span", { class: "cgrat" }, "Event")] : []),
       el("span", { class: "ctake" }, "Total")));
-    for (const p of people) {
+    for (const p of daily) {
       tableBox.append(el("div", { class: "prow" },
         el("span", { class: "cname" }, esc(p.name)),
         el("span", { class: "chrs" }, String(p.points ?? 0)),
         el("span", { class: "ctips" }, fmt(p.tips_cents)),
         el("span", { class: "cgrat" }, p.gratuity_cents ? fmt(p.gratuity_cents) : "—"),
-        ...(anyEvent ? [el("span", { class: "cgrat" },
-          p.event_cents ? fmt(p.event_cents) : "—")] : []),
-        el("span", { class: "ctake" }, fmt(take(p)))));
+        el("span", { class: "ctake" },
+          fmt(p.tips_cents + p.gratuity_cents))));
     }
-    if (people.length) {
-      const sum = (f) => people.reduce((a, p) => a + f(p), 0);
+    if (daily.length) {
+      const sum = (f) => daily.reduce((a, p) => a + f(p), 0);
       tableBox.append(el("div", { class: "prow ptotal" },
         el("span", { class: "cname" }, "Total"),
         el("span", { class: "chrs" }, ""),
         el("span", { class: "ctips" }, fmt(sum((p) => p.tips_cents))),
         el("span", { class: "cgrat" }, fmt(sum((p) => p.gratuity_cents))),
-        ...(anyEvent ? [el("span", { class: "cgrat" },
-          fmt(sum((p) => p.event_cents || 0)))] : []),
-        el("span", { class: "ctake" }, fmt(sum(take)))));
+        el("span", { class: "ctake" },
+          fmt(sum((p) => p.tips_cents + p.gratuity_cents)))));
     } else {
       tableBox.append(el("div", { class: "note" }, "Nothing to distribute yet."));
     }
+
+    eventTableBox.textContent = "";
+    if (eventPeople.length) {
+      eventTableBox.append(el("div", { class: "seclabel" }, "Event pool"));
+      const box = el("div", { class: "ptable" });
+      box.append(el("div", { class: "prow phead" },
+        el("span", { class: "cname" }, "Name"),
+        el("span", { class: "chrs" }, "Event h"),
+        el("span", { class: "ctake" }, "Event")));
+      for (const p of eventPeople) {
+        box.append(el("div", { class: "prow" },
+          el("span", { class: "cname" }, esc(p.name)),
+          el("span", { class: "chrs" },
+            p.event_hours ? p.event_hours.toFixed(2) : "—"),
+          el("span", { class: "ctake" }, fmt(p.event_cents))));
+      }
+      box.append(el("div", { class: "prow ptotal" },
+        el("span", { class: "cname" }, "Total"),
+        el("span", { class: "chrs" }, ""),
+        el("span", { class: "ctake" },
+          fmt(eventPeople.reduce((a, p) => a + p.event_cents, 0)))));
+      eventTableBox.append(box);
+
+      // one number per person, the figure that goes on the pay envelope
+      eventTableBox.append(el("div", { class: "seclabel" }, "Take home tonight"));
+      const th = el("div", { class: "ptable" });
+      for (const p of people) {
+        th.append(el("div", { class: "prow" },
+          el("span", { class: "cname" }, esc(p.name)),
+          el("span", { class: "ctake" }, fmt(take(p)))));
+      }
+      th.append(el("div", { class: "prow ptotal" },
+        el("span", { class: "cname" }, "Total"),
+        el("span", { class: "ctake" },
+          fmt(people.reduce((a, p) => a + take(p), 0)))));
+      eventTableBox.append(th);
+    }
+
     drawShifts();
+    drawEventBartender();
+    drawFlags();
   }
 
   /* ---- finalize / reopen ---- */
@@ -1711,6 +1902,9 @@ function poolTiles(t, model, missingDays = []) {
        [t.processing_fee_total_cents, "Processing fee"],
        [t.total_tips_cents, "Pooled tips"], [t.foh_pool_cents, "FOH 80%"],
        [t.boh_pool_cents, "Kitchen 20%"], [t.auto_gratuity_cents, "Auto-gratuity"],
+       // the event pool is a fourth money line, separate from tips and
+       // gratuity; $0.00 simply means no private event ran this period
+       [t.event_pool_cents, "Event tips"],
        [null, "Avg tip rate", pct(tipRate(t, { missingDays })),
         missingDays.length
           ? `needs re-pull: ${missingDays.join(", ")}`
@@ -2887,6 +3081,39 @@ async function renderSettings() {
     view.append(mk("poq_foh_pct", s.poq_foh_pct ?? "80",
       "Front-of-house share",
       "Percent of pooled tips to FOH; the kitchen takes the exact remainder."));
+
+    /* Which Square logon marks a private event. Poquitos rings contracted
+       events under a shared "Event Host" pin, and that is the only thing that
+       tells an event apart from an ordinary large party — private-dining-room
+       tickets carry the same 20% charge but are NOT events (owner 2026-08-28).
+       Without this, an event's service charge is paid to the daily pool. */
+    (async () => {
+      const emps = await api("/api/employees");
+      const linked = emps.filter((e) => (e.square_team_member_ids || []).length);
+      const sel = el("select", { style: "width:auto" },
+        el("option", { value: "" }, "— none: enter events by hand —"));
+      for (const e of linked) {
+        for (const tmid of e.square_team_member_ids) {
+          sel.append(el("option", { value: tmid,
+            ...((s.poq_event_logon_tmid || "") === tmid ? { selected: "" } : {}) },
+            e.display_name));
+        }
+      }
+      sel.addEventListener("change", async () => {
+        try {
+          await api("/api/settings", { method: "PUT",
+            body: { poq_event_logon_tmid: sel.value } });
+          toast("Event logon saved");
+        } catch (e) { toast(e.message, true); }
+      });
+      view.append(el("div", { class: "card" }, el("h2", {}, "Private event logon"),
+        el("div", { class: "row" },
+          el("span", { class: "hint", style: "flex:1" },
+            "The Square account events are rung under. Its orders become the "
+            + "event pool instead of the day's auto-gratuity, and its own "
+            + "timecards are ignored — a shared pin is a till, not a person."),
+          sel)));
+    })();
 
     /* overtime is REPORTING ONLY — it never moves a tip payout. These two
        must mirror the venue's point-of-sale labor settings or the period

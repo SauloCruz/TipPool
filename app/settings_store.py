@@ -109,6 +109,13 @@ DEFAULTS = {
     # 2026-08-13). "0" = no deduction; set the venue's real processor rate in
     # Setup. Cash tips are never touched — no processor handles them.
     "poq_card_fee_pct": "0",
+    # Square team member whose orders mark a PRIVATE EVENT. Poquitos rings
+    # contracted events under a shared "Event Host" pin (owner 2026-08-28), so
+    # this one id separates the event's service charge and tips from the day's
+    # ordinary large-party gratuity. Blank = no auto-detection; events are then
+    # entered by hand. The account is a till, not a person: its timecards are
+    # ignored so its clocked hours never take a share.
+    "poq_event_logon_tmid": "",
     # Overtime, for REPORTING only — it never touches a tip payout. Mirrors
     # the venue's Square labor settings so the period report reconciles
     # against Square's own regular/overtime/paid figures. Verified against

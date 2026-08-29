@@ -116,6 +116,11 @@ class PoqDayInputsBody(BaseModel):
     shifts: list[PoqShiftBody] = []
     event_service_charge_cents: int = Field(default=0, ge=0)
     event_tips_cents: int = Field(default=0, ge=0)
+    event_card_cents: int = Field(default=0, ge=0)
+    event_start: str | None = None
+    event_end: str | None = None
+    event_bartender_employee_id: int | None = None
+    event_bartender_hours: float = Field(default=0.0, ge=0)
     net_sales_cents: int = Field(default=0, ge=0)   # reporting only
 
 
@@ -183,6 +188,10 @@ class SettingsPatch(BaseModel):
     # POINTS_HOURS: card processing fee withheld from credit tips before pooling
     poq_card_fee_pct: str | None = None
     poq_foh_pct: str | None = None
+    # POINTS_HOURS: the Square logon private events are rung under. Its orders
+    # become the event pool instead of the day's auto-gratuity; "" disables
+    # detection and events are entered by hand.
+    poq_event_logon_tmid: str | None = None
     # POINTS_HOURS overtime, REPORTING ONLY — mirrors the venue's payroll
     # settings so the period report reconciles; never enters a tip payout
     poq_workweek_start: str | None = None
@@ -908,6 +917,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 declarations, key=lambda d: (-d["cents"], d["name"])),
         }
 
+    def acked_flags(row) -> list[str]:
+        """Flags a manager has looked at and accepted for this day.
+
+        A flag asks for a decision, it does not mean the day is wrong — the
+        no-host event re-split is the routine case. Once reviewed, the day
+        should stop nagging on the period screen. Names are stored, not a
+        boolean, so a flag that appears LATER still raises the mark.
+        """
+        try:
+            return list(json.loads(row["acked_flags_json"] or "[]"))
+        except (KeyError, IndexError, TypeError, ValueError):
+            return []
+
     def day_payload(conn, venue, d: date) -> dict:
         row = day_row(conn, venue["id"], d)
         emps = employees_map(conn, venue["id"])
@@ -916,7 +938,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "date": d.isoformat(), "status": "not_started",
                 "inputs": dict(EMPTY_INPUTS_BY_MODEL[venue["tip_model"]]),
                 "computed": compute_or_422(conn, venue, EMPTY_INPUTS_BY_MODEL[venue["tip_model"]], emps),
-                "snapshots": [], "square": None,
+                "acked_flags": [], "snapshots": [], "square": None,
             }
         inputs = json.loads(row["inputs_json"])
         if row["status"] == "finalized":
@@ -932,6 +954,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "date": d.isoformat(), "status": row["status"], "inputs": inputs,
             "computed": computed,
             "finalized_at": row["finalized_at"],
+            "acked_flags": acked_flags(row),
             "snapshots": [dict(s) for s in snaps],
             "square": square_payload(conn, row),
         }
@@ -939,6 +962,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/days/{date_str}")
     def get_day(date_str: str, user: User, conn: DB, venue: Venue):
         return day_payload(conn, venue, parse_date(date_str))
+
+    @app.post("/api/days/{date_str}/ack-flags")
+    def ack_day_flags(date_str: str, body: dict, user: User, conn: DB,
+                      venue: Venue):
+        """Mark this day's flags as reviewed (or clear the acknowledgement).
+
+        Deliberately records the flag NAMES rather than a "reviewed" bit: if
+        the day changes and raises something new, that new flag is unreviewed
+        and the period screen marks the day again.
+        """
+        d = parse_date(date_str)
+        row = day_row(conn, venue["id"], d)
+        if row is None:
+            raise HTTPException(404, "no such day")
+        flags = sorted({str(f) for f in (body.get("flags") or [])})
+        conn.execute("UPDATE day SET acked_flags_json = ? WHERE id = ?",
+                     (json.dumps(flags), row["id"]))
+        audit(conn, venue["id"], user["id"], "day.ack_flags", "day", row["id"],
+              json.dumps({"date": d.isoformat(), "flags": flags}))
+        conn.commit()
+        return day_payload(conn, venue, d)
 
     @app.put("/api/days/{date_str}")
     def put_day(date_str: str, body: dict, user: User, conn: DB, venue: Venue):
@@ -1518,7 +1562,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                       "credit_tips_gross_cents": 0, "credit_tips_net_cents": 0,
                       "cash_tips_cents": 0, "card_fee_cents": 0,
                       "auto_gratuity_gross_cents": 0, "gratuity_fee_cents": 0,
-                      "processing_fee_total_cents": 0, "net_sales_cents": 0}
+                      "processing_fee_total_cents": 0, "net_sales_cents": 0,
+                      "event_pool_cents": 0, "event_fee_cents": 0}
         else:
             totals = {"total_tips_cents": 0, "boh_allocation_cents": 0,
                       "foh_pool_cents": 0, "auto_gratuity_cents": 0}
@@ -1548,8 +1593,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if row["status"] == "finalized"
                 else compute_or_422(conn, venue, json.loads(row["inputs_json"]), emps)
             )
+            acked = set(acked_flags(row))
             flags_on = [k for k, v in outputs["flags"].items()
-                        if v and k not in INFO_FLAGS]
+                        if v and k not in INFO_FLAGS and k not in acked]
             if flags_on:
                 flagged_dates.append(key)
             if row["status"] != "finalized":

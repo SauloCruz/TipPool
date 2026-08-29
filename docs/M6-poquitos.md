@@ -126,14 +126,32 @@ rather than letting the money vanish. This mirrors the La Fontana precedent
 where an empty pool returns to the contributing staff. Say the word if it
 should behave differently.
 
+### Settled 2026-08-28 (third round) — pull + bartender built
+
+Verified against the real 2026-08-17 event before any of this was written:
+one ticket, `801 Jake Event - (2)`, $1,353.13 with a 20% service charge of
+$204.00, no tips, tendered EXTERNAL.
+
+| Rule | Ruling |
+|---|---|
+| What marks an event | The **shared "Event Host" Square logon**. Every order that account rang is the event's; its 20% charge becomes the event pool instead of the day's auto-gratuity, and its card tips become event tips. Setting `poq_event_logon_tmid` (blank = type events by hand). |
+| `PDR` tickets | **NOT events.** Private-dining-room parties are rung by regular servers under their own logon and their 20% charge is ordinary large-party gratuity — 230 orders carried service charges in Jul–Aug and only one came from the event logon. "Has a 20% charge" can never be the test. |
+| The "Event Host" account | A **till, not a person**. Its timecards are ignored, so its clocked hours take no share (it was clocked in as an Event Server for 6.75 h on 08/17). |
+| Event window | Inferred from the ticket: **top of the hour before the first order, through payment**. 08/17 = 15:00–17:34, bracketing the real Event Server's 14:02–17:42 shift. Editable is not needed in v1; the day screen shows it. |
+| The bartender | No `Event Bartender` job exists, so the bartender on duty works the event on an ordinary Bartender clock-in and **earns from both pools**: overlap hours move to the event's service pool, the rest of the shift stays daily. One overlapping bartender is drafted automatically; **two or more and the app asks** rather than guessing. |
+| Processing fee | Applies to the **card-handled part of the event pool only**, before the 80/20 split. The 08/17 event was invoiced, so it bore no fee — the base is read per tender, never assumed. |
+| Special events | Cinco de Mayo, Block Party etc. follow the **ordinary daily policy**. No special handling. |
+
 ### Still OPEN
 
-1. Take-out catering 20% service charge -> "Chef and Manager": what split?
-2. Special events (Cinco de Mayo, Block Party) — same mechanics as a private
-   event, or simply "everyone who worked shares the event tips equally"?
-3. The extra end-of-event host gratuity is "divided equally amongst the staff
-   working the event" — does that mean the event service staff only, or
-   everyone including support and kitchen?
+1. **Take-out catering.** The 20% service charge splits 40% Chef / 40% Manager
+   / 20% house (owner 2026-08-28) — but this is NOT built. It pays two
+   pool-EXCLUDED people through a line no pool touches, and nothing yet says
+   how a catering order is told apart from any other in Square. Both halves
+   need answering before it can be written.
+2. The 3% administrative fee to the organising manager is still charged in
+   addition and left out of the engine (2026-08-03). If catering gets built,
+   it belongs in the same "pay an excluded person" plumbing.
 
 ---
 

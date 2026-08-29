@@ -11,7 +11,8 @@ Issues come in two severities:
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from collections.abc import Iterable
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
@@ -98,16 +99,23 @@ def extract_food_sales(orders: list[dict], catalog_lookup: dict[str, dict],
 
 # ---------- payments ----------
 
-def extract_credit_tips(payments: list[dict]) -> dict:
+def extract_credit_tips(payments: list[dict],
+                        exclude_order_ids: Iterable[str] = ()) -> dict:
     """Σ tip_money on COMPLETED card payments, net of refunded tips.
     Refund split rule: a refund eats the non-tip portion first, so the tip
     is considered refunded only for the part exceeding it:
         refunded_tip = clamp(refunded_total - (payment_total - tip), 0, tip)
+
+    `exclude_order_ids` drops payments belonging to a private event: that
+    money is the event pool's, not the daily pool's (see extract_event_money).
     """
+    skip = set(exclude_order_ids or ())
     total = 0
     rows = []
     for p in payments:
         if p.get("status") != "COMPLETED" or "card_details" not in p:
+            continue
+        if p.get("order_id") in skip:
             continue
         tip = _amount(p.get("tip_money"))
         if tip == 0 and not p.get("refunded_money"):
@@ -125,7 +133,8 @@ def extract_credit_tips(payments: list[dict]) -> dict:
 # ---------- service charges ----------
 
 def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
-                         payments: list[dict] | None = None) -> dict:
+                         payments: list[dict] | None = None,
+                         exclude_order_ids: Iterable[str] = ()) -> dict:
     """Order service charges owed to staff as auto-gratuity.
 
     Matching (any of): Square's explicit `type == AUTO_GRATUITY` (catalog
@@ -137,6 +146,10 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
     `total_money` includes sales tax and must NOT be distributed."""
     want_id = grat_cfg.get("catalog_object_id")
     want_name = (grat_cfg.get("name_contains") or "").lower()
+    # A private event's 20% charge is also an AUTO_GRATUITY, but it belongs to
+    # the event pool rather than the day's — the caller passes those order ids
+    # here so the same money is never distributed twice.
+    skip = set(exclude_order_ids or ())
 
     # Refunds: money handed back is not owed to staff. Same split rule as
     # tips — a refund eats the non-service-charge portion of the check first,
@@ -156,6 +169,8 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
     refunded_total = 0
     rows = []
     for order in orders:
+        if order.get("id") in skip:
+            continue
         for sc in order.get("service_charges", []):
             matched = (
                 sc.get("type") == "AUTO_GRATUITY"
@@ -182,6 +197,99 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
                          "cents": amt - back, "refunded_cents": back})
     return {"auto_gratuity_cents": total, "charges": rows,
             "refunded_gratuity_cents": refunded_total}
+
+
+# ---------- private events ----------
+
+def extract_event_money(orders: list[dict], payments: list[dict],
+                        event_tmid: str, tz_name: str) -> dict:
+    """Private-event money, told apart from the day's ordinary trade by the
+    Square logon that rang it.
+
+    Poquitos rings a contracted event under a shared "Event Host" pin (owner
+    2026-08-28), so every order that account created belongs to the event and
+    none of it belongs to the daily pool: the 20% service charge is the event
+    pool, not auto-gratuity, and any card tips are event tips, not credit
+    tips. Ordinary large-party gratuity is untouched — including
+    private-dining-room tickets, which regular servers ring under their own
+    logon and which are NOT events (owner 2026-08-28).
+
+    Two other things come out of the same orders:
+
+    * `card_cents` — how much of the pool the card processor actually handled,
+      so the fee is withheld from that part only. The 08/17 event was tendered
+      EXTERNAL (invoiced), where a blanket fee would have been simply wrong.
+    * `window` — the event's clock times, inferred as the top of the hour
+      before the first order was opened through the moment the ticket was
+      paid (owner 2026-08-28). It decides how many of the bartender's hours
+      were worked on the event.
+    """
+    if not event_tmid:
+        return {"event_service_charge_cents": 0, "event_tips_cents": 0,
+                "card_cents": 0, "order_ids": [], "window": None, "orders": []}
+
+    ev_orders = [o for o in orders
+                 if o.get("created_by_team_member_id") == event_tmid]
+    order_ids = [o["id"] for o in ev_orders if o.get("id")]
+    if not ev_orders:
+        return {"event_service_charge_cents": 0, "event_tips_cents": 0,
+                "card_cents": 0, "order_ids": [], "window": None, "orders": []}
+
+    pays_by_order: dict[str, list[dict]] = {}
+    for p in payments or ():
+        pays_by_order.setdefault(p.get("order_id"), []).append(p)
+
+    sc_total = tip_total = card_base = 0
+    rows = []
+    for o in ev_orders:
+        oid = o.get("id")
+        pays = [p for p in pays_by_order.get(oid, [])
+                if p.get("status") == "COMPLETED"]
+        paid = sum(_amount(p.get("total_money")) for p in pays)
+        refunded = sum(_amount(p.get("refunded_money")) for p in pays)
+        card_paid = sum(_amount(p.get("total_money")) for p in pays
+                        if "card_details" in p)
+
+        sc = sum(_amount(c.get("applied_money")) if c.get("applied_money") is not None
+                 else _amount(c.get("total_money")) - _amount(c.get("total_tax_money"))
+                 for c in o.get("service_charges", []))
+        tip = sum(_amount(p.get("tip_money")) for p in pays)
+
+        # Refunds come off the same way as elsewhere: a refund eats the
+        # ordinary part of the check first, so only the excess reaches the
+        # charge and the tip.
+        pool = sc + tip
+        back = min(pool, max(0, refunded - (paid - pool))) if refunded else 0
+        # split the clawback across the two lines in proportion
+        sc_back = (back * sc) // pool if pool else 0
+        tip_back = back - sc_back
+
+        sc_total += sc - sc_back
+        tip_total += tip - tip_back
+        # the processor only handled the card-tendered share of this check
+        if paid:
+            card_base += ((sc - sc_back) + (tip - tip_back)) * card_paid // paid
+        rows.append({"order_id": oid, "ticket_name": o.get("ticket_name"),
+                     "service_charge_cents": sc - sc_back,
+                     "tips_cents": tip - tip_back,
+                     "refunded_cents": back,
+                     "tenders": sorted({p.get("source_type") for p in pays}),
+                     "created_at": o.get("created_at"),
+                     "closed_at": o.get("closed_at")})
+
+    tz = ZoneInfo(tz_name)
+    opened = min(_iso(o["created_at"]) for o in ev_orders if o.get("created_at"))
+    paid_at = max(_iso(o["closed_at"]) for o in ev_orders if o.get("closed_at"))
+    start = opened.astimezone(tz).replace(minute=0, second=0, microsecond=0)
+    end = paid_at.astimezone(tz)
+    if end <= start:                      # a same-hour event: give it the hour
+        end = start + timedelta(hours=1)
+    return {"event_service_charge_cents": sc_total,
+            "event_tips_cents": tip_total,
+            "card_cents": card_base,
+            "order_ids": order_ids,
+            "window": {"start_at": start.isoformat(), "end_at": end.isoformat()},
+            "orders": rows}
 
 
 # ---------- timecards ----------
@@ -471,7 +579,8 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
 
 def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
                           tzname: str, increment: Decimal,
-                          job_roles: dict[str, str]) -> dict:
+                          job_roles: dict[str, str],
+                          ignore_tmids: Iterable[str] = ()) -> dict:
     # NOTE `increment` is accepted for signature parity with the other
     # extractors but deliberately unused: Poquitos does not round hours to an
     # increment (owner 2026-08-14). See the quantize below.
@@ -487,7 +596,13 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
 
     A job title with no mapping is BLOCKING — the day cannot be trusted until
     someone says what it is worth (never guess a point value).
+
+    `ignore_tmids` drops timecards belonging to a shared till account — the
+    "Event Host" logon is a pin for ringing an event, not a person (owner
+    2026-08-28), and paying its clocked hours would hand a real person's
+    share to nobody.
     """
+    skip_tmids = set(ignore_tmids or ())
     tz = ZoneInfo(tzname)
     shifts: list[dict] = []
     cash = 0
@@ -500,6 +615,8 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
 
     for tc in timecards:
         tmid = tc.get("team_member_id", "?")
+        if tmid in skip_tmids:
+            continue
         emp = emp_by_tmid.get(tmid)
         if emp is None:
             unmapped_members.append(tmid)

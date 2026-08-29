@@ -129,8 +129,13 @@ label { display: block; font-weight: 600; margin: 12px 0 4px; }
 .check input { width: 22px; height: 22px; min-height: 0; accent-color: var(--accent); }
 
 /* computed summary */
-.pools { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.pool { background: var(--panel2); border-radius: 10px; padding: 10px; }
+/* Flex rather than grid so a short last row stretches to fill the width
+   instead of leaving a hole — the tile count changes with the tip model. */
+.pools { display: flex; flex-wrap: wrap; gap: 8px; }
+.pool {
+  background: var(--panel2); border-radius: 10px; padding: 10px;
+  flex: 1 1 calc(50% - 4px); min-width: 0;
+}
 .pool .v { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .pool .k { color: var(--muted); font-size: .8rem; }
 
@@ -401,7 +406,7 @@ details.card > summary .src { vertical-align: 0; }
 #toast.err { border-color: var(--bad); color: var(--bad); }
 
 @media (min-width: 700px) {
-  .pools { grid-template-columns: repeat(4, 1fr); }
+  .pool { flex-basis: calc(25% - 6px); }
   main { padding-top: 20px; }
 }
 

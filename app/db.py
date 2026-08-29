@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Incremental migrations applied in order after the base schema.
 MIGRATIONS: dict[int, str] = {
@@ -107,6 +107,13 @@ MIGRATIONS: dict[int, str] = {
     # Default 1: everyone existing stays on the payroll sheet.
     8: """
     ALTER TABLE employee ADD COLUMN in_payroll INTEGER NOT NULL DEFAULT 1;
+    """,
+    # M6: flags a manager has looked at and accepted. A flag is a prompt to
+    # review, not a fault — once reviewed the day should stop nagging on the
+    # period screen. Stores the exact flag names acknowledged, so a NEW flag
+    # appearing later still raises the mark.
+    9: """
+    ALTER TABLE day ADD COLUMN acked_flags_json TEXT;
     """,
 }
 

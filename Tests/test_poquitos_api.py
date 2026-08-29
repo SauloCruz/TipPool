@@ -1325,3 +1325,168 @@ class TestSquareEmploymentStatus:
         someone who left mid-period still has to be paid for it."""
         p = client.get("/api/periods/2027-05-04/export", headers=poq["h"]).json()
         assert any(r["name"] == "Ana" for r in p["payroll"])
+
+
+class TestEventPullFromSquare:
+    """The 2026-08-17 shape end to end: one ticket rung under the shared
+    "Event Host" pin, with an ordinary large party the same night."""
+
+    DAY = "2026-08-19"
+
+    def _setup(self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        client.put("/api/settings", headers=poq["h"],
+                   json={"poq_event_logon_tmid": "TM_EVENT"})
+        fake.orders = [
+            {"id": "EVT", "created_by_team_member_id": "TM_EVENT",
+             "ticket_name": "801 Jake Event",
+             "created_at": "2026-08-19T22:08:00Z",
+             "closed_at": "2026-08-20T00:34:00Z",
+             "service_charges": [{"type": "AUTO_GRATUITY", "percentage": "20",
+                                  "applied_money": money(20400)}]},
+            {"id": "PDR", "created_by_team_member_id": "TM_BEN",
+             "ticket_name": "PDR", "created_at": "2026-08-19T23:00:00Z",
+             "closed_at": "2026-08-20T01:00:00Z",
+             "service_charges": [{"type": "AUTO_GRATUITY", "percentage": "20",
+                                  "applied_money": money(4100)}]},
+        ]
+        fake.payments = [
+            {"id": "P_EVT", "order_id": "EVT", "status": "COMPLETED",
+             "source_type": "EXTERNAL", "total_money": money(135313),
+             "tip_money": money(0)},
+            {"id": "P_PDR", "order_id": "PDR", "status": "COMPLETED",
+             "card_details": {}, "total_money": money(24600),
+             "tip_money": money(1500)},
+        ]
+        fake.timecards = [
+            # the shared pin clocks in too — it is a till, not a person
+            {"team_member_id": "TM_EVENT", "start_at": f"{self.DAY}T14:52:00-07:00",
+             "end_at": f"{self.DAY}T21:37:00-07:00", "wage": {"title": "Event Server"},
+             "declared_cash_tip_money": money(0)},
+            {"team_member_id": "TM_ANA", "start_at": f"{self.DAY}T13:18:00-07:00",
+             "end_at": f"{self.DAY}T21:38:00-07:00", "wage": {"title": "Bartender"},
+             "declared_cash_tip_money": money(0)},
+            {"team_member_id": "TM_BEN", "start_at": f"{self.DAY}T16:00:00-07:00",
+             "end_at": f"{self.DAY}T22:00:00-07:00", "wage": {"title": "Server"},
+             "declared_cash_tip_money": money(0)},
+            {"team_member_id": "TM_CID", "start_at": f"{self.DAY}T15:00:00-07:00",
+             "end_at": f"{self.DAY}T21:00:00-07:00", "wage": {"title": "Line Cook"},
+             "declared_cash_tip_money": money(0)},
+        ]
+        return client.post(f"/api/days/{self.DAY}/pull", headers=poq["h"]).json()
+
+    def test_event_charge_is_split_out_of_the_daily_gratuity(self, client, poq, staff):
+        body = self._setup(client, poq, staff)
+        ins = body["inputs"]
+        assert ins["event_service_charge_cents"] == 20400
+        assert ins["auto_gratuity_cents"] == 4100      # the PDR party's, untouched
+        assert ins["credit_tips_cents"] == 1500
+
+    def test_invoiced_event_records_no_card_portion(self, client, poq, staff):
+        assert self._setup(client, poq, staff)["inputs"]["event_card_cents"] == 0
+
+    def test_window_and_bartender_are_inferred(self, client, poq, staff):
+        ins = self._setup(client, poq, staff)["inputs"]
+        assert ins["event_start"].startswith(f"{self.DAY}T15:00:00")
+        assert ins["event_bartender_employee_id"] == staff["Ana"]
+        assert ins["event_bartender_hours"] == pytest.approx(2.57, abs=0.02)
+
+    def test_the_shared_pin_takes_no_share(self, client, poq, staff):
+        body = self._setup(client, poq, staff)
+        assert all(s["employee_id"] != staff.get("EventHost")
+                   for s in body["inputs"]["shifts"])
+        names = {p["name"] for p in body["computed"]["people"]}
+        assert "Event Host" not in names
+
+    def test_the_drafted_bartender_is_paid_from_both_pools(self, client, poq, staff):
+        body = self._setup(client, poq, staff)
+        rows = {p["name"]: p for p in body["computed"]["people"]}
+        assert rows["Ana"]["tips_cents"] > 0 and rows["Ana"]["event_cents"] > 0
+        assert sum(p["event_cents"] for p in body["computed"]["people"]) == 20400
+
+
+class TestFlagReview:
+    """A flag asks for a decision, it does not mean the day is wrong. Once a
+    manager has looked at it the day should stop nagging on the period screen
+    — but a NEW flag must still raise the mark."""
+
+    DAY = "2026-08-21"
+
+    def _flagged_day(self, client, poq, staff):
+        # event money with no host on shift -> event_no_host_worked
+        return client.put(f"/api/days/{self.DAY}", headers=poq["h"], json={
+            "credit_tips_cents": 20000,
+            "event_service_charge_cents": 20400,
+            "shifts": [
+                {"employee_id": staff["Ana"], "role": "EVENT_SERVER", "hours": 4},
+                {"employee_id": staff["Ben"], "role": "SERVER", "hours": 8},
+                {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 8},
+            ]}).json()
+
+    def _period_flags(self, client, poq):
+        p = client.get("/api/periods/2026-08-16", headers=poq["h"]).json()
+        return {d["date"]: sorted(d.get("flags_on", [])) for d in p["days"]}
+
+    def _ack_all(self, client, poq, body):
+        """Mark every flag the day raises, the way the day screen does."""
+        on = sorted(k for k, v in body["computed"]["flags"].items() if v)
+        return client.post(f"/api/days/{self.DAY}/ack-flags", headers=poq["h"],
+                           json={"flags": on}).json()
+
+    def test_the_day_starts_flagged(self, client, poq, staff):
+        body = self._flagged_day(client, poq, staff)
+        assert body["computed"]["flags"]["event_no_host_worked"] is True
+        assert body["acked_flags"] == []
+        assert "event_no_host_worked" in self._period_flags(client, poq)[self.DAY]
+
+    def test_marking_reviewed_clears_the_period_mark(self, client, poq, staff):
+        body = self._flagged_day(client, poq, staff)
+        out = self._ack_all(client, poq, body)
+        assert "event_no_host_worked" in out["acked_flags"]
+        assert self._period_flags(client, poq)[self.DAY] == []
+
+    def test_a_new_flag_raises_the_mark_again(self, client, poq, staff):
+        self._ack_all(client, poq, self._flagged_day(client, poq, staff))
+        # now take the kitchen away: a second, unreviewed flag appears
+        client.put(f"/api/days/{self.DAY}", headers=poq["h"], json={
+            "credit_tips_cents": 20000,
+            "event_service_charge_cents": 20400,
+            "shifts": [
+                {"employee_id": staff["Ana"], "role": "EVENT_SERVER", "hours": 4},
+                {"employee_id": staff["Ben"], "role": "SERVER", "hours": 8},
+            ]})
+        # only the kitchen flags are new; the reviewed event ones stay quiet
+        assert self._period_flags(client, poq)[self.DAY] == [
+            "event_no_boh_worked", "no_boh_worked"]
+
+    def test_review_can_be_undone(self, client, poq, staff):
+        self._ack_all(client, poq, self._flagged_day(client, poq, staff))
+        client.post(f"/api/days/{self.DAY}/ack-flags", headers=poq["h"],
+                    json={"flags": []})
+        assert "event_no_host_worked" in self._period_flags(client, poq)[self.DAY]
+
+    def test_reviewing_is_audited(self, client, poq, staff):
+        self._ack_all(client, poq, self._flagged_day(client, poq, staff))
+        rows = client.get("/api/audit-log", headers=poq["h"]).json()
+        if isinstance(rows, dict):
+            rows = next(v for v in rows.values() if isinstance(v, list))
+        assert any(r["action"] == "day.ack_flags" for r in rows)
+
+    def test_unknown_day_cannot_be_acknowledged(self, client, poq):
+        r = client.post("/api/days/2026-11-11/ack-flags", headers=poq["h"],
+                        json={"flags": ["whatever"]})
+        assert r.status_code == 404
+
+
+class TestPeriodCarriesEventTotal:
+    def test_event_pool_totals_for_the_period(self, client, poq, staff):
+        client.put("/api/days/2026-08-23", headers=poq["h"], json={
+            "credit_tips_cents": 10000,
+            "event_service_charge_cents": 50000,
+            "shifts": [
+                {"employee_id": staff["Ana"], "role": "EVENT_SERVER", "hours": 4},
+                {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 8},
+            ]})
+        client.post("/api/days/2026-08-23/finalize", headers=poq["h"])
+        p = client.get("/api/periods/2026-08-16", headers=poq["h"]).json()
+        assert p["totals"]["event_pool_cents"] >= 50000

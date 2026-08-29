@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 from engine import business_day_bounds
@@ -27,7 +27,9 @@ from .square_extract import (
     extract_timecards_poq,
     build_catalog_lookup,
     extract_auto_gratuity,
+    _iso,
     extract_credit_tips,
+    extract_event_money,
     extract_food_sales,
     extract_lf_timecards,
     extract_server_tips,
@@ -39,7 +41,10 @@ SQUARE_FIELDS = ("food_sales_cents", "credit_tips_cents", "auto_gratuity_cents",
 LF_SQUARE_FIELDS = ("server_tips", "server_cash_tips", "auto_gratuity_cents",
                     "hours", "unattributed_tips_cents")
 POQ_SQUARE_FIELDS = ("credit_tips_cents", "cash_tips_cents",
-                     "auto_gratuity_cents", "shifts", "net_sales_cents")
+                     "auto_gratuity_cents", "shifts", "net_sales_cents",
+                     "event_service_charge_cents", "event_tips_cents",
+                     "event_card_cents", "event_start", "event_end",
+                     "event_bartender_employee_id", "event_bartender_hours")
 SQUARE_FIELDS_BY_MODEL = {"POOL_HOURS": SQUARE_FIELDS,
                           "PERCENT_TIPOUT": LF_SQUARE_FIELDS,
                           "POINTS_HOURS": POQ_SQUARE_FIELDS}
@@ -209,13 +214,57 @@ def should_auto_sync(day_row: sqlite3.Row | None) -> bool:
     return day_row is None or day_row["status"] != "finalized"
 
 
+def _event_bartender(shifts: list[dict], window: dict) -> tuple[dict | None, list[dict]]:
+    """Who tended bar during the event, and for how many of their hours.
+
+    Poquitos has no Event Bartender job, so the bartender on duty covers a
+    private event on an ordinary Bartender clock-in (owner 2026-08-28). Any
+    bartender whose shift overlaps the event window is a candidate; when
+    exactly one does, they are drafted automatically. When more than one does,
+    nobody is drafted and the manager is asked to say which — the app must not
+    guess who was behind the event bar.
+
+    The hours returned are the overlap only. The rest of the shift stays in
+    the daily pool, so the bartender earns from both.
+    """
+    start, end = _iso(window["start_at"]), _iso(window["end_at"])
+    candidates = []
+    for sh in shifts:
+        if sh.get("role") != "BARTENDER" or not sh.get("start_at") or not sh.get("end_at"):
+            continue
+        overlap = (min(_iso(sh["end_at"]), end).timestamp()
+                   - max(_iso(sh["start_at"]), start).timestamp())
+        if overlap <= 0:
+            continue
+        hours = float((Decimal(round(overlap)) / 3600).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP))
+        # never credit more event hours than the shift actually holds
+        hours = min(hours, float(sh["hours"]))
+        if hours <= 0:
+            continue
+        candidates.append({"employee_id": sh["employee_id"],
+                           "name": sh.get("name") or str(sh["employee_id"]),
+                           "hours": hours})
+    candidates.sort(key=lambda c: c["name"])
+    return (candidates[0] if len(candidates) == 1 else None), candidates
+
+
 def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
                      venue, user_id) -> dict:
     """POINTS_HOURS (Poquitos): card tips, auto-gratuity, and one shift per
     timecard carrying the Square job chosen at clock-in. No food sales — the
     pool is a straight 80/20 of tips, not a % of food."""
-    tips = extract_credit_tips(payments)
-    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"], payments)
+    # A private event is whatever the shared "Event Host" pin rang (owner
+    # 2026-08-28). Pull it out FIRST: its 20% service charge is an
+    # AUTO_GRATUITY like any other, so without this the event's money would be
+    # distributed to the daily pool and the event's own staff would get
+    # nothing — which is exactly what happened to 2026-08-17.
+    event_tmid = str(settings.get("poq_event_logon_tmid") or "")
+    event = extract_event_money(orders, payments, event_tmid, venue["timezone"])
+
+    tips = extract_credit_tips(payments, exclude_order_ids=event["order_ids"])
+    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"],
+                                 payments, exclude_order_ids=event["order_ids"])
     # Net sales (ex tax, tip and service charge) — not part of the payout math,
     # but it is the denominator for the period's tip rate. Reproduces Square's
     # own "Total Sales" figure exactly.
@@ -232,6 +281,7 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
         # them (2dp, nearest) rather than rounding to an increment
         Decimal("0"),
         settings_store.poq_job_roles(settings),
+        ignore_tmids=[event_tmid] if event_tmid else [],
     )
 
     issues = labor["issues"]
@@ -248,6 +298,27 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
             for s in labor["shifts"]
         ]
 
+    if event["window"]:
+        values["event_service_charge_cents"] = event["event_service_charge_cents"]
+        values["event_tips_cents"] = event["event_tips_cents"]
+        values["event_card_cents"] = event["card_cents"]
+        values["event_start"] = event["window"]["start_at"]
+        values["event_end"] = event["window"]["end_at"]
+        if not blocked:
+            picked, candidates = _event_bartender(labor["shifts"], event["window"])
+            values["event_bartender_employee_id"] = picked["employee_id"] if picked else None
+            values["event_bartender_hours"] = picked["hours"] if picked else 0.0
+            if len(candidates) > 1:
+                issues.append({
+                    "severity": "warning", "code": "pick_event_bartender",
+                    "detail": [f"{c['name']} ({c['hours']:.2f} h on the event)"
+                               for c in candidates],
+                    "blocks": [],
+                })
+            elif not candidates:
+                issues.append({"severity": "warning", "code": "no_event_bartender",
+                               "detail": [], "blocks": []})
+
     return {
         "pulled_at": utcnow(),
         "pulled_by": user_id,
@@ -256,6 +327,7 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
         "raw": {
             "payments": tips["payments"],
             "service_charges": grat["charges"],
+            "event_orders": event["orders"],
             "shifts": labor["shifts"],
             "counts": {"payments": len(payments), "orders": len(orders),
                        "timecards": len(timecards)},

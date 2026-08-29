@@ -343,6 +343,8 @@ class EventResult:
     boh_portion_cents: int
     service_pool_cents: int
     payout_cents: dict[str, int]
+    gross_cents: int = 0
+    card_fee_cents: int = 0
     service_payout_cents: dict[str, int] = field(default_factory=dict)
     support_payout_cents: dict[str, int] = field(default_factory=dict)
     boh_payout_cents: dict[str, int] = field(default_factory=dict)
@@ -360,6 +362,8 @@ def compute_event_points_hours(
     foh_pct=DEFAULT_POQ_FOH_PCT,
     support_pct=DEFAULT_SUPPORT_TIPOUT_PCT,
     support_groups: Mapping[str, Iterable[str]] | None = None,
+    card_fee_pct=DEFAULT_CARD_FEE_PCT,
+    card_pool=None,
 ) -> EventResult:
     """Distribute one private/special event (Poquitos policy, §2 of the M6 doc).
 
@@ -372,6 +376,12 @@ def compute_event_points_hours(
     tip-outs go to everyone who worked that role that day, whether or not they
     were on the event. Event service staff are identified by their role's side
     being "EVENT" — the job they clocked in under.
+
+    `card_pool` is how much of the pool the card processor handled; the fee is
+    withheld from that part only, before the 80/20 split, exactly as on an
+    ordinary day (owner 2026-08-14). An invoiced event pays no fee — which is
+    the common case here, so it must not be assumed. Defaults to the whole
+    pool when not given.
     """
     role_points = dict(role_points or DEFAULT_ROLE_POINTS)
     role_side = dict(role_side or DEFAULT_ROLE_SIDE)
@@ -385,7 +395,16 @@ def compute_event_points_hours(
         raise UnknownRoleError(
             f"no points mapping for role(s): {', '.join(unknown)}")
 
-    pool_cents = to_cents(service_charge) + to_cents(event_tips)
+    gross_cents = to_cents(service_charge) + to_cents(event_tips)
+    card_cents = gross_cents if card_pool is None else to_cents(card_pool)
+    if not 0 <= card_cents <= gross_cents:
+        raise ValueError("card_pool cannot exceed the event pool")
+    fee_rate = _as_fraction(card_fee_pct) / 100
+    if not 0 <= fee_rate < 1:
+        raise ValueError("card_fee_pct must be at least 0 and under 100")
+    card_fee_cents = int((card_cents * fee_rate + Fraction(1, 2)).__floor__())
+    pool_cents = gross_cents - card_fee_cents
+
     pct = _as_fraction(foh_pct) / 100
     if not 0 <= pct <= 1:
         raise ValueError("foh_pct must be between 0 and 100")
@@ -465,6 +484,8 @@ def compute_event_points_hours(
     assert sum(merged.values()) == pool_cents - undistributed
 
     return EventResult(
+        gross_cents=gross_cents,
+        card_fee_cents=card_fee_cents,
         pool=_cents(pool_cents),
         foh_portion=_cents(foh_cents),
         boh_portion=_cents(boh_cents),
