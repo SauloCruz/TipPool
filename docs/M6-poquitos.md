@@ -149,9 +149,13 @@ $204.00, no tips, tendered EXTERNAL.
    pool-EXCLUDED people through a line no pool touches, and nothing yet says
    how a catering order is told apart from any other in Square. Both halves
    need answering before it can be written.
-2. The 3% administrative fee to the organising manager is still charged in
-   addition and left out of the engine (2026-08-03). If catering gets built,
-   it belongs in the same "pay an excluded person" plumbing.
+2. The 3% administrative fee is **handled as of 2026-08-29**: the venue added
+   an "Event Administrative Fee" charge in Square, and `house_service_charges`
+   keeps it out of every pool whatever type Square gives it, reporting it on
+   the day as the house's own line. What is still NOT built is PAYING it to
+   the organising manager — that is the same "pay a pool-excluded person"
+   plumbing catering needs, and neither exists yet. The fee is currently
+   visible and correctly excluded, not distributed.
 
 ---
 

@@ -367,3 +367,57 @@ class TestSilentCorrectionsAreFlagged:
     def test_card_portion_within_the_pool_raises_nothing(self):
         out = compute(event_card_cents=20400)
         assert "event_card_portion_capped" not in out["flags"]
+
+
+class TestTheAdministrativeFee:
+    """Poquitos added an "Event Administrative Fee" to its Square account
+    (2026-08-29). By policy it is the organising manager's and never touches
+    the staff pool — and it must stay out however Square types it."""
+
+    HOUSE = ["administrative fee"]
+    PAYMENTS = [payment("P", "EVT", 138373, card=False)]
+
+    def _order(self, fee_type):
+        return [order("EVT", EVENT_TM, sc_cents=20400, extra_charges=[
+            {"type": fee_type, "name": "Event Administrative Fee",
+             "percentage": "3", "applied_money": money(3060)}])]
+
+    def test_excluded_when_square_types_it_custom(self):
+        ev = extract_event_money(self._order("CUSTOM"), self.PAYMENTS,
+                                 EVENT_TM, TZ, {}, self.HOUSE)
+        assert ev["event_service_charge_cents"] == 20400
+
+    def test_excluded_even_when_square_types_it_as_gratuity(self):
+        """The dashboard's gratuity flag is set by whoever made the charge; a
+        mis-ticked box must not put the house's cut in the staff pool."""
+        ev = extract_event_money(self._order("AUTO_GRATUITY"), self.PAYMENTS,
+                                 EVENT_TM, TZ, {}, self.HOUSE)
+        assert ev["event_service_charge_cents"] == 20400
+
+    def test_without_the_house_list_a_gratuity_typed_fee_would_be_pooled(self):
+        """Why the list exists: this is the failure it prevents."""
+        ev = extract_event_money(self._order("AUTO_GRATUITY"), self.PAYMENTS,
+                                 EVENT_TM, TZ, {}, [])
+        assert ev["event_service_charge_cents"] == 20400 + 3060
+
+    def test_it_is_reported_as_the_houses_own_charge(self):
+        ev = extract_event_money(self._order("AUTO_GRATUITY"), self.PAYMENTS,
+                                 EVENT_TM, TZ, {}, self.HOUSE)
+        assert [(c["name"], c["cents"], c["house"]) for c in ev["other_charges"]] \
+            == [("Event Administrative Fee", 3060, True)]
+
+    def test_an_unrecognised_charge_is_not_marked_as_the_houses(self):
+        orders = [order("EVT", EVENT_TM, sc_cents=20400, extra_charges=[
+            {"type": "CUSTOM", "name": "Room Hire", "percentage": None,
+             "applied_money": money(5000)}])]
+        ev = extract_event_money(orders, self.PAYMENTS, EVENT_TM, TZ, {}, self.HOUSE)
+        assert ev["other_charges"][0]["house"] is False
+
+    def test_the_daily_gratuity_honours_the_same_list(self):
+        """A catering admin fee can land on an ordinary ticket, not just an
+        event one."""
+        orders = [order("PDR", "TM_SERVER", sc_cents=4100, extra_charges=[
+            {"type": "AUTO_GRATUITY", "name": "Event Administrative Fee",
+             "percentage": "3", "applied_money": money(1200)}])]
+        grat = extract_auto_gratuity(orders, {}, self.PAYMENTS, house_names=self.HOUSE)
+        assert grat["auto_gratuity_cents"] == 4100

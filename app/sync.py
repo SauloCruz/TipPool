@@ -260,12 +260,14 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
     # distributed to the daily pool and the event's own staff would get
     # nothing — which is exactly what happened to 2026-08-17.
     event_tmid = str(settings.get("poq_event_logon_tmid") or "")
+    house_names = settings.get("house_service_charges") or []
     event = extract_event_money(orders, payments, event_tmid, venue["timezone"],
-                                settings["gratuity_service_charge"])
+                                settings["gratuity_service_charge"], house_names)
 
     tips = extract_credit_tips(payments, exclude_order_ids=event["order_ids"])
     grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"],
-                                 payments, exclude_order_ids=event["order_ids"])
+                                 payments, exclude_order_ids=event["order_ids"],
+                                 house_names=house_names)
     # Net sales (ex tax, tip and service charge) — not part of the payout math,
     # but it is the denominator for the period's tip rate. Reproduces Square's
     # own "Total Sales" figure exactly.
@@ -319,16 +321,21 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
             elif not candidates:
                 issues.append({"severity": "warning", "code": "no_event_bartender",
                                "detail": [], "blocks": []})
-        if event["other_charges"]:
-            # by policy the 3% admin fee goes to the organising manager and
-            # never touches the staff pool, so it is held out — but say so,
-            # rather than letting money vanish from the ticket silently
-            issues.append({
-                "severity": "warning", "code": "event_non_gratuity_charge",
-                "detail": [f"{c['name']} {'' if c['percentage'] is None else c['percentage'] + '% '}"
-                           f"${c['cents'] / 100:.2f}" for c in event["other_charges"]],
-                "blocks": [],
-            })
+        # Charges held out of the pool. A NAMED house charge is routine — the
+        # 3% admin fee is expected on every event — so it is reported as its
+        # own line rather than a warning to chase. An unrecognised charge is
+        # money nobody has accounted for and does want a human look.
+        def _describe(c):
+            pct = "" if c.get("percentage") is None else c["percentage"] + "% "
+            return f"{c['name']} {pct}${c['cents'] / 100:.2f}"
+
+        for code, want_house in (("event_house_charge", True),
+                                 ("event_non_gratuity_charge", False)):
+            rows = [c for c in event["other_charges"]
+                    if bool(c.get("house")) is want_house]
+            if rows:
+                issues.append({"severity": "warning", "code": code,
+                               "detail": [_describe(c) for c in rows], "blocks": []})
 
     return {
         "pulled_at": utcnow(),

@@ -22,6 +22,14 @@ DEFAULTS = {
     "category_map": {},
     # matches an order service charge by exact catalog id, else name substring
     "gratuity_service_charge": {"catalog_object_id": None, "name_contains": "gratuity"},
+    # Service charges the HOUSE keeps — never staff money, whatever type Square
+    # gives them. Matched by case-insensitive name substring and checked before
+    # anything else, because Square types a charge AUTO_GRATUITY whenever it is
+    # flagged as gratuity in the dashboard, and a mis-ticked box would otherwise
+    # put the house's cut straight into a staff pool. Poquitos adds a 3% "Event
+    # Administrative Fee" to private events; by policy it goes to the manager
+    # who organised the event and never touches the pool.
+    "house_service_charges": ["administrative fee"],
     # weekday index (0=Mon .. 6=Sun) -> minutes after local midnight
     "tippable_windows": {
         str(wd): {"open_minutes": 17 * 60, "close_minutes": 24 * 60} for wd in range(7)

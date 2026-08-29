@@ -1490,3 +1490,58 @@ class TestPeriodCarriesEventTotal:
         client.post("/api/days/2026-08-23/finalize", headers=poq["h"])
         p = client.get("/api/periods/2026-08-16", headers=poq["h"]).json()
         assert p["totals"]["event_pool_cents"] >= 50000
+
+
+class TestAdminFeeThroughThePull:
+    """The 3% "Event Administrative Fee" added to the Square account
+    2026-08-29 must reach the day as a reported house charge, never as pool
+    money — end to end, not just in the extractor."""
+
+    DAY = "2026-08-21"
+
+    def _pull(self, client, poq, staff, fee_type):
+        fake = client.app.state.square_client_factory()
+        client.put("/api/settings", headers=poq["h"],
+                   json={"poq_event_logon_tmid": "TM_EVENT"})
+        fake.orders = [{
+            "id": "EVT", "created_by_team_member_id": "TM_EVENT",
+            "ticket_name": "802 Event", "created_at": f"{self.DAY}T22:00:00Z",
+            "closed_at": f"{self.DAY}T23:30:00Z",
+            "service_charges": [
+                {"type": "AUTO_GRATUITY", "percentage": "20",
+                 "applied_money": money(20400)},
+                {"type": fee_type, "name": "Event Administrative Fee",
+                 "percentage": "3", "applied_money": money(3060)},
+            ]}]
+        fake.payments = [{"id": "P", "order_id": "EVT", "status": "COMPLETED",
+                          "source_type": "EXTERNAL", "total_money": money(138373),
+                          "tip_money": money(0)}]
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "start_at": f"{self.DAY}T14:00:00-07:00",
+             "end_at": f"{self.DAY}T22:00:00-07:00", "wage": {"title": "Bartender"},
+             "declared_cash_tip_money": money(0)},
+            {"team_member_id": "TM_CID", "start_at": f"{self.DAY}T15:00:00-07:00",
+             "end_at": f"{self.DAY}T21:00:00-07:00", "wage": {"title": "Line Cook"},
+             "declared_cash_tip_money": money(0)},
+        ]
+        return client.post(f"/api/days/{self.DAY}/pull", headers=poq["h"]).json()
+
+    def test_only_the_gratuity_becomes_the_event_pool(self, client, poq, staff):
+        body = self._pull(client, poq, staff, "CUSTOM")
+        assert body["inputs"]["event_service_charge_cents"] == 20400
+
+    def test_a_gratuity_typed_admin_fee_is_still_kept_out(self, client, poq, staff):
+        body = self._pull(client, poq, staff, "AUTO_GRATUITY")
+        assert body["inputs"]["event_service_charge_cents"] == 20400
+        assert body["inputs"]["auto_gratuity_cents"] == 0
+
+    def test_the_fee_is_reported_as_a_house_charge(self, client, poq, staff):
+        body = self._pull(client, poq, staff, "AUTO_GRATUITY")
+        codes = {i["code"]: i for i in body["square"]["issues"]}
+        assert "event_house_charge" in codes
+        assert "Event Administrative Fee 3% $30.60" in codes["event_house_charge"]["detail"]
+        assert "event_non_gratuity_charge" not in codes
+
+    def test_nobody_is_paid_the_fee(self, client, poq, staff):
+        body = self._pull(client, poq, staff, "AUTO_GRATUITY")
+        assert sum(p["event_cents"] for p in body["computed"]["people"]) == 20400

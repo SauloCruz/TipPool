@@ -173,6 +173,9 @@ class EmployeePatch(BaseModel):
 class SettingsPatch(BaseModel):
     category_map: dict[str, dict] | None = None
     gratuity_service_charge: dict | None = None
+    # service charges the house keeps: never staff money, whatever Square types
+    # them (see settings_store.house_service_charges)
+    house_service_charges: list[str] | None = None
     tippable_windows: dict[str, dict] | None = None
     rounding_increment: str | None = None
     # 0 (midnight) .. 360 (6 AM); how far past midnight the business day runs

@@ -282,6 +282,27 @@ Historical employee data in the public test fixtures is pseudonymized.
 - [ ] Per-shift pooling within a single day (one shift per day today)
 - [ ] **Staff self-service view** — let employees look up their own take-home instead of printing stubs
 
+### Queued (third-party review, 2026-08-29)
+
+- [ ] **Poquitos job-role mapping screen** — the mappings are settings-only today, and
+  an unmapped Square job title BLOCKS the day, so a new role added at the point of sale
+  currently needs an API call to clear. The most likely operational snag; do this first
+- [ ] **Login rate limiting** — cheap and worth having; needs a threshold generous enough
+  that it can never lock out a manager mid-close
+- [ ] **CI on push** — GitHub Actions running the suite. Would have caught the schema
+  version and card-fee documentation drift
+- [ ] **Hosted-auth hardening** — secure cookies must be config-gated, NOT simply switched
+  on: the app is served over plain HTTP on the venue Wi-Fi and `secure=True` would stop
+  the session cookie being sent at all. Only relevant if hosting publicly
+- [ ] **Overtime lookback certainty** — a day in the prior workweek that was never pulled
+  reads as zero hours rather than unknown, so first-week overtime can look more certain
+  than it is. Narrow: only bites when a lookback day was never pulled
+
+Declined from the same review: a SQLite restore drill (this is a calculator, Square
+Payroll is the system of record — owner 2026-07-29), and clearer event-bartender
+selection warnings (already shipped: the pull names every candidate and the day screen
+refuses to guess).
+
 ## License
 
 TipPool is licensed under the [Elastic License 2.0](LICENSE) (ELv2):

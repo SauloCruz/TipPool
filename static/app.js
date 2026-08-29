@@ -131,6 +131,8 @@ const ISSUE_TEXT = {
   role_mismatch: (d) => `Role mismatch (assigned role wins): ${d.join("; ")}`,
   pick_event_bartender: (d) =>
     `More than one bartender was on during the event (${d.join(", ")}). Pick the one who worked it under Private event — the app will not guess.`,
+  event_house_charge: (d) =>
+    `Held out of the event pool, as policy says: ${d.join(", ")}. That is the house's charge — the administrative fee belongs to the manager who organised the event, not the staff pool. Nothing to do.`,
   event_non_gratuity_charge: (d) =>
     `The event ticket carries ${d.length > 1 ? "charges" : "a charge"} that ${d.length > 1 ? "are" : "is"} not gratuity (${d.join(", ")}). Held OUT of the event pool — the 3% administrative fee is the organising manager's and never touches staff. Check it is not a staff charge under an unexpected name.`,
   no_event_bartender: () =>
@@ -3200,6 +3202,35 @@ async function renderSettings() {
     el("label", {}, "Also match service charges whose name contains"),
     el("div", { class: "row" }, gratInput, gratSave),
     el("div", { class: "note" }, "Matched charges are pulled as the auto-gratuity pool (reported as wages, separate from tips).")));
+
+  /* --- house service charges: the exclusion that outranks everything ---
+     A charge named here is never staff money, whatever type Square gives it.
+     It has to outrank the AUTO_GRATUITY test above, because that type is set
+     by whoever created the charge in the dashboard — Poquitos's 3% event
+     administrative fee would otherwise be pooled on a mis-ticked box. */
+  const houseInput = el("input", {
+    value: (s.house_service_charges || []).join(", ") });
+  const houseSave = el("button", { class: "small" }, "Save");
+  houseSave.addEventListener("click", async () => {
+    const names = houseInput.value.split(",").map((x) => x.trim()).filter(Boolean);
+    try {
+      await api("/api/settings", { method: "PUT",
+        body: { house_service_charges: names } });
+      toast("Saved");
+    } catch (e) { toast(e.message, true); }
+  });
+  view.append(el("div", { class: "card" },
+    el("h2", {}, "House service charges — never pooled"),
+    el("div", { class: "note" },
+      "Charges the house keeps for its own account. Checked before anything "
+      + "else, so a charge named here stays out of every pool even if Square "
+      + "marks it as gratuity. Poquitos's 3% event administrative fee belongs "
+      + "to the manager who organised the event, not the staff."),
+    el("label", {}, "Never pool charges whose name contains (comma separated)"),
+    el("div", { class: "row" }, houseInput, houseSave),
+    el("div", { class: "note" },
+      "Held-out charges are still reported on the day, so money is never "
+      + "dropped without saying so.")));
 
   /* --- tippable windows --- */
   const winCard = el("div", { class: "card" },

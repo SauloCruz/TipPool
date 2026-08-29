@@ -132,15 +132,32 @@ def extract_credit_tips(payments: list[dict],
 
 # ---------- service charges ----------
 
-def _is_staff_gratuity(sc: dict, want_id: str | None, want_name: str) -> bool:
+def _is_house_charge(sc: dict, house_names: Iterable[str] = ()) -> bool:
+    """A charge the house levies for its own account, never staff money.
+
+    Checked FIRST and it wins outright, because the alternative is not safe:
+    Square types a service charge `AUTO_GRATUITY` whenever it is flagged as
+    gratuity in the dashboard, and that flag is set by whoever created the
+    charge — so the Poquitos 3% "Event Administrative Fee" could arrive
+    carrying the same type as a real tip and be pooled before its name was
+    ever looked at. Naming the house's charges explicitly is the only test
+    that does not depend on how someone ticked a box in Square.
+    """
+    name = (sc.get("name") or "").lower()
+    return any(h and h.lower() in name for h in house_names)
+
+
+def _is_staff_gratuity(sc: dict, want_id: str | None, want_name: str,
+                       house_names: Iterable[str] = ()) -> bool:
     """Is this service charge money owed to staff?
 
     Square's explicit `AUTO_GRATUITY` type (catalog gratuity charges carry no
     name on the order), the configured catalog id, or a case-insensitive name
-    match for custom/ad-hoc charges. Anything else on a ticket is a charge the
-    house levies for its own account — the Poquitos policy's 3% administrative
-    fee is the known example — and must never reach a staff pool.
+    match for custom/ad-hoc charges — unless it is a named house charge, which
+    is never staff money whatever type it carries.
     """
+    if _is_house_charge(sc, house_names):
+        return False
     return bool(
         sc.get("type") == "AUTO_GRATUITY"
         or (want_id and sc.get("catalog_object_id") == want_id)
@@ -157,7 +174,8 @@ def _charge_cents(sc: dict) -> int:
 
 def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
                          payments: list[dict] | None = None,
-                         exclude_order_ids: Iterable[str] = ()) -> dict:
+                         exclude_order_ids: Iterable[str] = (),
+                         house_names: Iterable[str] = ()) -> dict:
     """Order service charges owed to staff as auto-gratuity.
 
     Matching (any of): Square's explicit `type == AUTO_GRATUITY` (catalog
@@ -195,7 +213,7 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
         if order.get("id") in skip:
             continue
         for sc in order.get("service_charges", []):
-            if not _is_staff_gratuity(sc, want_id, want_name):
+            if not _is_staff_gratuity(sc, want_id, want_name, house_names):
                 continue
             amt = _charge_cents(sc)
             oid = order.get("id")
@@ -217,7 +235,8 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
 
 def extract_event_money(orders: list[dict], payments: list[dict],
                         event_tmid: str, tz_name: str,
-                        grat_cfg: dict | None = None) -> dict:
+                        grat_cfg: dict | None = None,
+                        house_names: Iterable[str] = ()) -> dict:
     """Private-event money, told apart from the day's ordinary trade by the
     Square logon that rang it.
 
@@ -279,15 +298,17 @@ def extract_event_money(orders: list[dict], payments: list[dict],
 
         sc = 0
         for c in o.get("service_charges", []):
-            if _is_staff_gratuity(c, want_id, want_name):
+            if _is_staff_gratuity(c, want_id, want_name, house_names):
                 sc += _charge_cents(c)
             elif _charge_cents(c):
-                # the house's own charge (the 3% admin fee, by policy) — out of
-                # the pool, but named so the day can say what it left behind
+                # out of the pool either way, but say which kind: a named house
+                # charge (the 3% admin fee) is routine, an unrecognised one is
+                # money nobody has accounted for and wants a human look
                 other.append({"order_id": oid,
                               "name": c.get("name") or c.get("type") or "service charge",
                               "percentage": c.get("percentage"),
-                              "cents": _charge_cents(c)})
+                              "cents": _charge_cents(c),
+                              "house": _is_house_charge(c, house_names)})
         tip = sum(_amount(p.get("tip_money")) for p in pays)
 
         # Refunds come off the same way as elsewhere: a refund eats the
