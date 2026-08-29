@@ -111,6 +111,15 @@ function datePickButton(datePick) {
   return b;
 }
 
+/** Confirm prompts are a per-user preference (see /api/me/prefs). An admin
+ *  re-running a stretch of days finds them pure friction; a manager closing
+ *  one night wants the guardrail. Neither finalize nor reopen destroys
+ *  anything — snapshots are kept and versioned — so this is safe to skip. */
+function askFirst(message) {
+  if (ME?.prefs?.skip_confirmations) return true;
+  return confirm(message);
+}
+
 const ISSUE_TEXT = {
   unmapped_category: (d) =>
     `Unmapped Square categories: ${Object.values(d).join(", ")}. Map them in Setup, then pull again — food sales are blocked until then.`,
@@ -828,7 +837,7 @@ async function renderDay(dateArg) {
   async function onPrimary() {
     if (finalized) {
       if (ME.role === "admin") {
-        if (!confirm("Reopen this finalized day? A new snapshot version will be written when it is finalized again.")) return;
+        if (!askFirst("Reopen this finalized day? A new snapshot version will be written when it is finalized again.")) return;
         await api(`/api/days/${dateStr}/reopen`, { method: "POST" });
         route();
       } else {
@@ -1333,7 +1342,7 @@ async function renderDayLF(dateArg) {
   async function onPrimary() {
     if (finalized) {
       if (ME.role === "admin") {
-        if (!confirm("Reopen this finalized day?")) return;
+        if (!askFirst("Reopen this finalized day?")) return;
         await api(`/api/days/${dateStr}/reopen`, { method: "POST" });
         route();
       } else {
@@ -1844,8 +1853,8 @@ async function renderDayPoq(dateArg) {
   finBtn.addEventListener("click", async () => {
     if (finalized) {
       if (ME.role !== "admin") { location.hash = `#/period/${dateStr}`; return; }
-      if (!confirm("Reopen this finalized day? A new snapshot version will be "
-                   + "written when it is finalized again.")) return;
+      if (!askFirst("Reopen this finalized day? A new snapshot version will be "
+                    + "written when it is finalized again.")) return;
       try {
         await api(`/api/days/${dateStr}/reopen`, { method: "POST" });
         toast("Day reopened");
@@ -1853,15 +1862,57 @@ async function renderDayPoq(dateArg) {
       } catch (e) { toast(e.message, true); }
       return;
     }
-    if (!confirm("Finalize this day? It writes an immutable snapshot.")) return;
+    if (!askFirst("Finalize this day? It writes an immutable snapshot.")) return;
     try {
       await api(`/api/days/${dateStr}/finalize`, { method: "POST" });
       toast("Day finalized");
       location.reload();
     } catch (e) { toast(e.message, true); }
   });
-  view.append(el("div", { class: "actionbar" },
-    el("div", {}, statusEl), finBtn));
+  // One click for the reopen -> pull -> finalize cycle, which is what you do
+  // after an engine change lands. It reports what moved: re-pulling a locked
+  // day CAN shift a payout (a timecard edited in Square since), and the manual
+  // path never showed you that.
+  const refreshBtn = el("button", { class: "ghost", type: "button" },
+    "⟳ Re-pull & re-finalize");
+  refreshBtn.addEventListener("click", async () => {
+    if (!askFirst("Re-pull this finalized day from Square and finalize it "
+                  + "again? Payouts can move if a timecard changed since.")) return;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = "Re-pulling…";
+    try {
+      const out = await api(`/api/days/${dateStr}/refresh`, { method: "POST" });
+      const moved = out.refresh?.moved || [];
+      if (!moved.length) {
+        toast("Re-pulled — nothing moved");
+      } else {
+        toast(`Re-pulled — ${moved.length} payout${moved.length > 1 ? "s" : ""} moved`);
+      }
+      sessionStorage.setItem("lastRefresh", JSON.stringify(out.refresh || {}));
+      location.reload();
+    } catch (e) {
+      toast(e.message, true);
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "⟳ Re-pull & re-finalize";
+    }
+  });
+
+  const bar = el("div", { class: "actionbar" }, el("div", {}, statusEl));
+  if (finalized && ME.role === "admin") bar.append(refreshBtn);
+  bar.append(finBtn);
+  view.append(bar);
+
+  // what the last re-pull changed, shown once after the reload
+  const last = sessionStorage.getItem("lastRefresh");
+  if (last) {
+    sessionStorage.removeItem("lastRefresh");
+    const info = JSON.parse(last);
+    if ((info.moved || []).length) {
+      view.append(el("div", { class: "flag" },
+        "Re-pull moved: " + info.moved.map((m) =>
+          `${m.name} ${fmt(m.before_cents)} → ${fmt(m.after_cents)}`).join(" · ")));
+    }
+  }
 
   refreshAll();
 }
@@ -3184,6 +3235,33 @@ async function renderSettings() {
           "Tip credit per hour for a host/door shift, marked per person per day on the Daily screen. 0.5 = half credit; 1 = no reduction. Applies to tips and auto-gratuity. Finalized days keep the rate they were locked with."),
         doorInput)));
   }
+
+  /* --- this user's own preferences (never anyone else's) --- */
+  const skipBox = el("input", { type: "checkbox",
+    ...(ME?.prefs?.skip_confirmations ? { checked: "" } : {}) });
+  skipBox.addEventListener("change", async () => {
+    try {
+      const prefs = await api("/api/me/prefs", { method: "PUT",
+        body: { skip_confirmations: skipBox.checked } });
+      ME.prefs = prefs;
+      toast(prefs.skip_confirmations ? "Prompts off" : "Prompts on");
+    } catch (e) {
+      skipBox.checked = !skipBox.checked;
+      toast(e.message, true);
+    }
+  });
+  view.append(el("div", { class: "card" },
+    el("h2", {}, "Your preferences"),
+    el("div", { class: "note" },
+      "Yours alone — everyone else keeps their own setting."),
+    el("label", { class: "row", style: "gap:10px;align-items:center" },
+      el("span", { style: "flex:none;display:flex" }, skipBox),
+      el("span", { style: "flex:1" },
+        "Skip the confirm prompts on finalize and reopen")),
+    el("div", { class: "note" },
+      "Neither action destroys anything: reopening keeps every snapshot, and "
+      + "finalizing again writes a new version rather than replacing one. "
+      + "Worth leaving on if you close one night at a time.")));
 
   /* --- gratuity service charge --- */
   const gratInput = el("input", { value: s.gratuity_service_charge.name_contains || "" });

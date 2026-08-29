@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Incremental migrations applied in order after the base schema.
 MIGRATIONS: dict[int, str] = {
@@ -114,6 +114,13 @@ MIGRATIONS: dict[int, str] = {
     # appearing later still raises the mark.
     9: """
     ALTER TABLE day ADD COLUMN acked_flags_json TEXT;
+    """,
+    # Per-user interface preferences (JSON). Today: skipping the confirm
+    # prompts on finalize/reopen, which an admin doing a run of days finds
+    # pure friction while a manager closing one night wants the guardrail.
+    # NULL = defaults, so every existing user is unaffected.
+    10: """
+    ALTER TABLE user ADD COLUMN prefs_json TEXT;
     """,
 }
 

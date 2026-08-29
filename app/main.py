@@ -565,6 +565,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.delete_cookie("session_token")
         return {"ok": True}
 
+    DEFAULT_PREFS = {
+        # Confirm prompts on finalize/reopen. On by default: a manager closing
+        # one night wants the guardrail. An admin re-running a stretch of days
+        # after an engine change finds it pure friction, and neither action is
+        # destructive — a reopen keeps every snapshot, and re-finalizing writes
+        # a new version rather than overwriting one.
+        "skip_confirmations": False,
+    }
+
+    def user_prefs(user) -> dict:
+        raw = user["prefs_json"] if "prefs_json" in user.keys() else None
+        stored = json.loads(raw) if raw else {}
+        return {**DEFAULT_PREFS, **{k: v for k, v in stored.items()
+                                    if k in DEFAULT_PREFS}}
+
+    class PrefsBody(BaseModel):
+        skip_confirmations: bool | None = None
+
+    @app.put("/api/me/prefs")
+    def put_my_prefs(body: PrefsBody, user: User, conn: DB):
+        """A user's own interface preferences — never anyone else's."""
+        prefs = {**user_prefs(user),
+                 **body.model_dump(exclude_none=True)}
+        conn.execute("UPDATE user SET prefs_json = ? WHERE id = ?",
+                     (json.dumps(prefs), user["id"]))
+        conn.commit()
+        return prefs
+
     @app.get("/api/me")
     def me(user: User, conn: DB, venue: Venue):
         today = datetime.now(ZoneInfo(venue["timezone"])).date()
@@ -578,6 +606,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                       "tip_model": venue["tip_model"]},
             "venues": venues,
             "today": today.isoformat(),
+            "prefs": user_prefs(user),
         }
 
     @app.get("/api/venues")
@@ -1291,6 +1320,97 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         apply_pull(conn, venue, d, record, user["id"])
         conn.commit()
         return day_payload(conn, venue, d)
+
+    def _payout_by_person(outputs: dict | None) -> dict[int, int]:
+        """What each person was owed, whatever the venue's model calls it.
+
+        Sums every `*_cents` field on a payout row rather than naming them, so
+        this keeps working as models gain pools (the event pool did exactly
+        that) instead of quietly comparing a subset.
+        """
+        out: dict[int, int] = {}
+        for row in (outputs or {}).get("people", []) or ():
+            eid = row.get("employee_id")
+            if eid is None:
+                continue
+            out[eid] = sum(v for k, v in row.items()
+                           if k.endswith("_cents") and isinstance(v, int))
+        return out
+
+    @app.post("/api/days/{date_str}/refresh")
+    def refresh_finalized_day(date_str: str, admin: Admin, conn: DB, venue: Venue):
+        """Reopen, re-pull from Square and re-finalize, in one action.
+
+        The manual path is reopen -> pull -> finalize, two confirm prompts
+        deep, and it is what you do after an engine change lands. Collapsing
+        it is not just fewer clicks: the manual path shows you NOTHING about
+        whether a locked payout moved, while this reports the difference per
+        person. Re-pulling a finalized day genuinely can move money — a
+        timecard edited in Square since, a rate change — which is why this
+        stays admin-only and says what happened.
+
+        The Square fetch runs BEFORE anything is written, so a failed pull
+        leaves the day finalized and untouched.
+        """
+        d = parse_date(date_str)
+        row = day_row(conn, venue["id"], d)
+        if row is None or row["status"] != "finalized":
+            raise HTTPException(409, "day is not finalized — pull it directly")
+
+        before = _payout_by_person(snapshot_outputs(conn, row["id"]))
+
+        client = get_square_client(venue)
+        try:
+            record = sync.pull_day(conn, client, venue, d, admin["id"])
+        except SquareError as exc:
+            raise HTTPException(502, str(exc))
+        except Exception as exc:
+            log.exception("refresh pull failed for %s on %s", venue["slug"], d)
+            raise HTTPException(
+                500,
+                f"Square pull failed for {d}: {type(exc).__name__}: {exc}. "
+                "The day is untouched and still finalized.",
+            )
+
+        conn.execute(
+            "UPDATE day SET status = 'draft', updated_at = ?, updated_by = ?"
+            " WHERE id = ?", (utcnow(), admin["id"], row["id"]))
+        audit(conn, venue["id"], admin["id"], "day_reopened", "day", d.isoformat(),
+              json.dumps({"reason": "refresh"}))
+        apply_pull(conn, venue, d, record, admin["id"])
+        conn.commit()
+
+        try:
+            payload = finalize_day(date_str, admin, conn, venue)
+        except HTTPException as exc:
+            # The re-pull surfaced something that blocks finalizing. The day is
+            # left OPEN with the new data — that is the honest state, and the
+            # same place the manual path would have left it — but say so
+            # plainly, because the day was locked a moment ago.
+            raise HTTPException(
+                exc.status_code,
+                f"{exc.detail} — the day has been re-pulled and left OPEN; "
+                "fix the above and finalize it.",
+            ) from exc
+
+        after = _payout_by_person(payload.get("computed"))
+        names = {eid: e["display_name"]
+                 for eid, e in employees_map(conn, venue["id"]).items()}
+        moved = []
+        for eid in sorted(before.keys() | after.keys()):
+            delta = after.get(eid, 0) - before.get(eid, 0)
+            if delta:
+                moved.append({"employee_id": eid,
+                              "name": names.get(eid, f"#{eid}"),
+                              "before_cents": before.get(eid, 0),
+                              "after_cents": after.get(eid, 0),
+                              "delta_cents": delta})
+        audit(conn, venue["id"], admin["id"], "day_refreshed", "day", d.isoformat(),
+              json.dumps({"moved": moved}))
+        conn.commit()
+        payload["refresh"] = {"moved": moved,
+                              "moved_total_cents": sum(m["delta_cents"] for m in moved)}
+        return payload
 
     @app.get("/api/settings")
     def get_settings(user: User, conn: DB, venue: Venue):

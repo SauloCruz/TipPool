@@ -1545,3 +1545,67 @@ class TestAdminFeeThroughThePull:
     def test_nobody_is_paid_the_fee(self, client, poq, staff):
         body = self._pull(client, poq, staff, "AUTO_GRATUITY")
         assert sum(p["event_cents"] for p in body["computed"]["people"]) == 20400
+
+
+class TestOneClickRefresh:
+    """Reopen -> pull -> finalize collapsed into one admin action, which is
+    what you do after an engine change lands."""
+
+    def _finalized_day(self, client, poq, staff, day, tip_cents=50000):
+        fake = client.app.state.square_client_factory()
+        fake.orders = []
+        fake.payments = [{"id": "P1", "status": "COMPLETED", "card_details": {},
+                          "tip_money": money(tip_cents),
+                          "total_money": money(200000)}]
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "start_at": f"{day}T18:00:00-07:00",
+             "end_at": f"{day}T23:00:00-07:00", "wage": {"title": "Bartender"},
+             "declared_cash_tip_money": money(0)},
+            {"team_member_id": "TM_CID", "start_at": f"{day}T16:00:00-07:00",
+             "end_at": f"{day}T22:00:00-07:00", "wage": {"title": "Line Cook"},
+             "declared_cash_tip_money": money(0)},
+        ]
+        client.post(f"/api/days/{day}/pull", headers=poq["h"])
+        r = client.post(f"/api/days/{day}/finalize", headers=poq["h"])
+        assert r.status_code == 200, r.text
+        return fake
+
+    def test_refresh_relocks_the_day_in_one_call(self, client, poq, staff):
+        day = "2026-10-05"
+        self._finalized_day(client, poq, staff, day)
+        r = client.post(f"/api/days/{day}/refresh", headers=poq["h"])
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "finalized"
+
+    def test_an_unchanged_day_reports_nothing_moved(self, client, poq, staff):
+        day = "2026-10-06"
+        self._finalized_day(client, poq, staff, day)
+        out = client.post(f"/api/days/{day}/refresh", headers=poq["h"]).json()
+        assert out["refresh"]["moved"] == []
+
+    def test_a_changed_timecard_is_reported_per_person(self, client, poq, staff):
+        day = "2026-10-07"
+        fake = self._finalized_day(client, poq, staff, day)
+        fake.payments[0]["tip_money"] = money(80000)   # Square edited since
+        out = client.post(f"/api/days/{day}/refresh", headers=poq["h"]).json()
+        moved = {m["name"]: m for m in out["refresh"]["moved"]}
+        assert moved, "a payout moved and must be reported, not hidden"
+        assert all(m["after_cents"] > m["before_cents"] for m in moved.values())
+
+    def test_a_day_that_is_not_finalized_is_refused(self, client, poq, staff):
+        r = client.post("/api/days/2026-10-09/refresh", headers=poq["h"])
+        assert r.status_code == 409
+
+    def test_a_failed_pull_leaves_the_day_finalized(self, client, poq, staff):
+        day = "2026-10-08"
+        fake = self._finalized_day(client, poq, staff, day)
+        def boom(*a, **k):
+            raise RuntimeError("square exploded")
+        original, fake.search_timecards = fake.search_timecards, boom
+        try:
+            r = client.post(f"/api/days/{day}/refresh", headers=poq["h"])
+            assert r.status_code == 500
+            after = client.get(f"/api/days/{day}", headers=poq["h"]).json()
+            assert after["status"] == "finalized", "a failed pull must not unlock the day"
+        finally:
+            fake.search_timecards = original
