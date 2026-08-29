@@ -1337,61 +1337,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                            if k.endswith("_cents") and isinstance(v, int))
         return out
 
-    @app.post("/api/days/{date_str}/refresh")
-    def refresh_finalized_day(date_str: str, admin: Admin, conn: DB, venue: Venue):
-        """Reopen, re-pull from Square and re-finalize, in one action.
+    def _refresh_one_day(conn, venue, admin, client, d: date) -> dict:
+        """Reopen, re-pull and re-finalize one finalized day.
 
-        The manual path is reopen -> pull -> finalize, two confirm prompts
-        deep, and it is what you do after an engine change lands. Collapsing
-        it is not just fewer clicks: the manual path shows you NOTHING about
-        whether a locked payout moved, while this reports the difference per
-        person. Re-pulling a finalized day genuinely can move money — a
-        timecard edited in Square since, a rate change — which is why this
-        stays admin-only and says what happened.
+        Shared by the single-day and whole-period actions so the two can never
+        drift apart. Never raises: every outcome comes back as a status, which
+        is what lets a period run report a bad day instead of aborting on it.
 
-        The Square fetch runs BEFORE anything is written, so a failed pull
-        leaves the day finalized and untouched.
+          refreshed  — relocked; `moved` says whose payout changed
+          skipped    — not finalized, or never pulled; untouched
+          failed     — the Square fetch failed BEFORE anything was written,
+                       so the day is still finalized and unchanged
+          left_open  — re-pulled, but something blocks finalizing. The day is
+                       now a DRAFT holding the new data. This is the one
+                       outcome that leaves state changed behind it, so it is
+                       reported loudly rather than counted as a success.
         """
-        d = parse_date(date_str)
+        iso = d.isoformat()
         row = day_row(conn, venue["id"], d)
         if row is None or row["status"] != "finalized":
-            raise HTTPException(409, "day is not finalized — pull it directly")
+            return {"date": iso, "status": "skipped", "reason": "not finalized"}
+        if row["square_json"] is None:
+            # never pulled: there is no Square baseline to refresh against, and
+            # pulling now would recompute a hand-entered day from scratch
+            return {"date": iso, "status": "skipped", "reason": "never pulled"}
 
         before = _payout_by_person(snapshot_outputs(conn, row["id"]))
-
-        client = get_square_client(venue)
         try:
             record = sync.pull_day(conn, client, venue, d, admin["id"])
         except SquareError as exc:
-            raise HTTPException(502, str(exc))
+            # upstream said no
+            return {"date": iso, "status": "failed", "error": str(exc), "code": 502}
         except Exception as exc:
+            # our own extraction fell over on a payload shape — that is a bug
+            # here, not at Square, and the status code should say so
             log.exception("refresh pull failed for %s on %s", venue["slug"], d)
-            raise HTTPException(
-                500,
-                f"Square pull failed for {d}: {type(exc).__name__}: {exc}. "
-                "The day is untouched and still finalized.",
-            )
+            return {"date": iso, "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}", "code": 500}
 
         conn.execute(
             "UPDATE day SET status = 'draft', updated_at = ?, updated_by = ?"
             " WHERE id = ?", (utcnow(), admin["id"], row["id"]))
-        audit(conn, venue["id"], admin["id"], "day_reopened", "day", d.isoformat(),
+        audit(conn, venue["id"], admin["id"], "day_reopened", "day", iso,
               json.dumps({"reason": "refresh"}))
         apply_pull(conn, venue, d, record, admin["id"])
         conn.commit()
 
         try:
-            payload = finalize_day(date_str, admin, conn, venue)
+            payload = finalize_day(iso, admin, conn, venue)
         except HTTPException as exc:
-            # The re-pull surfaced something that blocks finalizing. The day is
-            # left OPEN with the new data — that is the honest state, and the
-            # same place the manual path would have left it — but say so
-            # plainly, because the day was locked a moment ago.
-            raise HTTPException(
-                exc.status_code,
-                f"{exc.detail} — the day has been re-pulled and left OPEN; "
-                "fix the above and finalize it.",
-            ) from exc
+            return {"date": iso, "status": "left_open", "error": exc.detail}
 
         after = _payout_by_person(payload.get("computed"))
         names = {eid: e["display_name"]
@@ -1405,12 +1400,81 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                               "before_cents": before.get(eid, 0),
                               "after_cents": after.get(eid, 0),
                               "delta_cents": delta})
-        audit(conn, venue["id"], admin["id"], "day_refreshed", "day", d.isoformat(),
+        audit(conn, venue["id"], admin["id"], "day_refreshed", "day", iso,
               json.dumps({"moved": moved}))
         conn.commit()
-        payload["refresh"] = {"moved": moved,
-                              "moved_total_cents": sum(m["delta_cents"] for m in moved)}
+        return {"date": iso, "status": "refreshed", "moved": moved}
+
+    @app.post("/api/days/{date_str}/refresh")
+    def refresh_finalized_day(date_str: str, admin: Admin, conn: DB, venue: Venue):
+        """Reopen, re-pull from Square and re-finalize, in one action.
+
+        The manual path is reopen -> pull -> finalize, two confirm prompts
+        deep, and it is what you do after an engine change lands. Collapsing
+        it is not just fewer clicks: the manual path shows you NOTHING about
+        whether a locked payout moved, while this reports the difference per
+        person. Re-pulling a finalized day genuinely can move money — a
+        timecard edited in Square since, a rate change — which is why this
+        stays admin-only and says what happened.
+        """
+        d = parse_date(date_str)
+        result = _refresh_one_day(conn, venue, admin, get_square_client(venue), d)
+        if result["status"] == "skipped":
+            raise HTTPException(409, f"day is {result['reason']} — pull it directly")
+        if result["status"] == "failed":
+            raise HTTPException(
+                result.get("code", 502),
+                f"Square pull failed for {d}: {result['error']}. "
+                "The day is untouched and still finalized.")
+        if result["status"] == "left_open":
+            raise HTTPException(
+                422, f"{result['error']} — the day has been re-pulled and left "
+                     "OPEN; fix the above and finalize it.")
+        payload = day_payload(conn, venue, d)
+        payload["refresh"] = {
+            "moved": result["moved"],
+            "moved_total_cents": sum(m["delta_cents"] for m in result["moved"]),
+        }
         return payload
+
+    @app.post("/api/periods/{anchor}/refresh")
+    def refresh_period(anchor: str, admin: Admin, conn: DB, venue: Venue,
+                       scheme: str | None = None):
+        """Re-pull and re-finalize every finalized day in a period.
+
+        The same action as the single-day refresh, run across the period, for
+        when an engine change lands and a whole stretch needs re-running. One
+        bad day does NOT abort the rest — that would leave the run half done
+        with no account of where it stopped — so every day comes back with its
+        own outcome and the caller is told plainly which days moved money and
+        which were left open.
+        """
+        start, end = period_for_scheme(parse_date(anchor),
+                                       resolve_scheme(venue, scheme))
+        client = get_square_client(venue)
+        results = [_refresh_one_day(conn, venue, admin, client, d)
+                   for d in period_days(start, end)]
+        by = {k: [r for r in results if r["status"] == k]
+              for k in ("refreshed", "skipped", "failed", "left_open")}
+        moved_days = [r for r in by["refreshed"] if r["moved"]]
+        audit(conn, venue["id"], admin["id"], "period_refreshed", "period",
+              start.isoformat(),
+              json.dumps({"refreshed": len(by["refreshed"]),
+                          "moved": len(moved_days),
+                          "failed": [r["date"] for r in by["failed"]],
+                          "left_open": [r["date"] for r in by["left_open"]]}))
+        conn.commit()
+        return {
+            "start": start.isoformat(), "end": end.isoformat(),
+            "refreshed": len(by["refreshed"]),
+            "skipped": len(by["skipped"]),
+            "failed": by["failed"],
+            "left_open": by["left_open"],
+            "moved_days": [{"date": r["date"], "moved": r["moved"]}
+                           for r in moved_days],
+            "moved_total_cents": sum(m["delta_cents"] for r in moved_days
+                                     for m in r["moved"]),
+        }
 
     @app.get("/api/settings")
     def get_settings(user: User, conn: DB, venue: Venue):
@@ -1725,6 +1789,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 draft_dates.append(key)
             days_out.append({
                 "date": key, "status": row["status"], "flags_on": flags_on,
+                # whether a re-pull has anything to re-pull FROM: a day entered
+                # by hand has no Square baseline, and refreshing it would mean
+                # recomputing a manual day from scratch
+                "pulled": row["square_json"] is not None,
                 "total_tips_cents": outputs["totals"]["total_tips_cents"],
                 "foh_pool_cents": outputs["totals"].get("foh_pool_cents"),
             })

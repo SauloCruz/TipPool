@@ -2031,6 +2031,62 @@ async function renderPeriod(anchorArg) {
   if (toggle) view.append(toggle);
   view.append(poolTiles(p.totals, p.model, p.days_missing_sales || []));
 
+  // Re-pull the whole period: the same action as the day screen's, run across
+  // every finalized day, for when an engine change lands. Admin only, and it
+  // reports what moved — a bulk re-pull that silently shifted a locked payout
+  // would be the worst tool in the app.
+  // count what will ACTUALLY run: a finalized day entered by hand has no
+  // Square pull to refresh from and is skipped, so counting it here would
+  // promise more than the button delivers
+  const finalizedCount = p.days.filter(
+    (d) => d.status === "finalized" && d.pulled).length;
+  if (ME.role === "admin" && finalizedCount) {
+    const bulkBtn = el("button", { class: "ghost small", type: "button" },
+      `⟳ Re-pull ${finalizedCount} finalized day${finalizedCount > 1 ? "s" : ""}`);
+    const bulkOut = el("div", {});
+    bulkBtn.addEventListener("click", async () => {
+      if (!askFirst(`Re-pull and re-finalize ${finalizedCount} day(s) from `
+                    + "Square? Payouts can move if timecards changed since.")) return;
+      bulkBtn.disabled = true;
+      bulkBtn.textContent = "Re-pulling…";
+      bulkOut.textContent = "";
+      try {
+        const r = await api(`/api/periods/${anchor}/refresh`
+                            + `${p.scheme ? `?scheme=${p.scheme}` : ""}`,
+                            { method: "POST" });
+        const lines = [`${r.refreshed} day(s) re-pulled and locked again`];
+        if (r.skipped) lines.push(`${r.skipped} skipped (not finalized or never pulled)`);
+        bulkOut.append(el("div", { class: "note" }, lines.join(" · ")));
+        // the three outcomes worth reading in full
+        for (const d of r.moved_days) {
+          bulkOut.append(el("div", { class: "flag" },
+            `${d.date} — payouts moved: ` + d.moved.map((m) =>
+              `${m.name} ${fmt(m.before_cents)} → ${fmt(m.after_cents)}`).join(" · ")));
+        }
+        for (const d of r.left_open) {
+          bulkOut.append(el("div", { class: "flag bad" },
+            `${d.date} — re-pulled but LEFT OPEN: ${d.error}`));
+        }
+        for (const d of r.failed) {
+          bulkOut.append(el("div", { class: "flag bad" },
+            `${d.date} — pull failed, day untouched and still finalized: ${d.error}`));
+        }
+        if (!r.moved_days.length && !r.left_open.length && !r.failed.length) {
+          bulkOut.append(el("div", { class: "note" }, "Nothing moved."));
+        }
+        toast(`Re-pulled ${r.refreshed} day(s)`);
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        bulkBtn.disabled = false;
+        bulkBtn.textContent =
+          `⟳ Re-pull ${finalizedCount} finalized day${finalizedCount > 1 ? "s" : ""}`;
+      }
+    });
+    view.append(el("div", { class: "row", style: "margin:4px 2px 8px" }, bulkBtn),
+                bulkOut);
+  }
+
   const daysCard = el("div", { class: "card" }, el("h2", {}, "Days"));
   for (const d of p.days) {
     daysCard.append(el("a", { class: "daychip", href: `#/day/${d.date}` },

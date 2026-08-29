@@ -1609,3 +1609,136 @@ class TestOneClickRefresh:
             assert after["status"] == "finalized", "a failed pull must not unlock the day"
         finally:
             fake.search_timecards = original
+
+
+class TestPeriodRefresh:
+    """Re-pull a whole period after an engine change. One bad day must not
+    abort the run, and must not disappear from the report either.
+
+    Each test owns its own period: the client fixture is module-scoped, so
+    sharing dates makes the counts depend on test order.
+    """
+
+    def _finalize(self, client, poq, day, tip_cents=50000):
+        fake = client.app.state.square_client_factory()
+        fake.orders = []
+        fake.payments = [{"id": "P", "status": "COMPLETED", "card_details": {},
+                          "tip_money": money(tip_cents),
+                          "total_money": money(200000)}]
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "start_at": f"{day}T18:00:00-08:00",
+             "end_at": f"{day}T23:00:00-08:00", "wage": {"title": "Bartender"},
+             "declared_cash_tip_money": money(0)},
+            {"team_member_id": "TM_CID", "start_at": f"{day}T16:00:00-08:00",
+             "end_at": f"{day}T22:00:00-08:00", "wage": {"title": "Line Cook"},
+             "declared_cash_tip_money": money(0)},
+        ]
+        client.post(f"/api/days/{day}/pull", headers=poq["h"])
+        r = client.post(f"/api/days/{day}/finalize", headers=poq["h"])
+        assert r.status_code == 200, r.text
+        return fake
+
+    def _period(self, client, poq, month, days=(2, 3, 4)):
+        """Finalize a few days in `month`, return (anchor, [dates], fake)."""
+        dates = [f"{month}-{d:02d}" for d in days]
+        for day in dates:
+            fake = self._finalize(client, poq, day)
+        return f"{month}-01", dates, fake
+
+    def test_every_finalized_day_is_relocked(self, client, poq, staff):
+        anchor, dates, _ = self._period(client, poq, "2028-01")
+        out = client.post(f"/api/periods/{anchor}/refresh", headers=poq["h"]).json()
+        assert out["refreshed"] == len(dates)
+        for day in dates:
+            got = client.get(f"/api/days/{day}", headers=poq["h"]).json()
+            assert got["status"] == "finalized"
+
+    def test_days_never_pulled_are_skipped_not_invented(self, client, poq, staff):
+        anchor, dates, _ = self._period(client, poq, "2028-02")
+        out = client.post(f"/api/periods/{anchor}/refresh", headers=poq["h"]).json()
+        # a 15-day period with 3 finalized days: the rest are left alone.
+        # Inventing them would be far worse than skipping them.
+        assert out["skipped"] == 15 - len(dates)
+
+    def test_moved_payouts_are_reported_per_day(self, client, poq, staff):
+        anchor, dates, fake = self._period(client, poq, "2028-03")
+        fake.payments[0]["tip_money"] = money(90000)   # Square edited since
+        out = client.post(f"/api/periods/{anchor}/refresh", headers=poq["h"]).json()
+        assert {d["date"] for d in out["moved_days"]} == set(dates)
+        assert out["moved_total_cents"] > 0
+        # and every moved day names the people whose figure changed
+        assert all(m["name"] and m["delta_cents"]
+                   for d in out["moved_days"] for m in d["moved"])
+
+    def test_one_bad_day_does_not_abort_the_run(self, client, poq, staff):
+        anchor, dates, fake = self._period(client, poq, "2028-04")
+        original = fake.search_timecards
+        calls = {"n": 0}
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 2:            # blow up on the second day only
+                raise RuntimeError("square hiccup")
+            return original(*a, **k)
+
+        fake.search_timecards = flaky
+        try:
+            out = client.post(f"/api/periods/{anchor}/refresh",
+                              headers=poq["h"]).json()
+        finally:
+            fake.search_timecards = original
+        assert len(out["failed"]) == 1
+        assert out["refreshed"] == len(dates) - 1
+        # the failed day is still finalized: the fetch runs before anything is
+        # written, so a failure cannot leave a locked day unlocked
+        got = client.get(f"/api/days/{out['failed'][0]['date']}",
+                         headers=poq["h"]).json()
+        assert got["status"] == "finalized"
+
+    def test_a_hand_entered_day_is_not_offered_for_refresh(self, client, poq, staff):
+        """A finalized day with no Square pull behind it has nothing to
+        refresh FROM. The period payload says so, so the button can promise
+        only what it will actually do."""
+        day = "2028-06-02"
+        client.put(f"/api/days/{day}", headers=poq["h"], json={
+            "credit_tips_cents": 10000,
+            "shifts": [{"employee_id": staff["Ana"], "role": "SERVER", "hours": 5},
+                       {"employee_id": staff["Cid"], "role": "LINE_COOK", "hours": 5}]})
+        assert client.post(f"/api/days/{day}/finalize",
+                           headers=poq["h"]).status_code == 200
+        p = client.get("/api/periods/2028-06-01", headers=poq["h"]).json()
+        row = next(d for d in p["days"] if d["date"] == day)
+        assert row["status"] == "finalized" and row["pulled"] is False
+        out = client.post("/api/periods/2028-06-01/refresh",
+                          headers=poq["h"]).json()
+        assert out["refreshed"] == 0
+        # and it is still finalized: skipped means untouched
+        assert client.get(f"/api/days/{day}",
+                          headers=poq["h"]).json()["status"] == "finalized"
+
+    def test_a_day_left_open_is_reported_loudly(self, client, poq, staff):
+        """The one outcome that changes state without succeeding: re-pulled,
+        but something blocks finalizing. It must never be counted as a win."""
+        anchor, dates, fake = self._period(client, poq, "2028-05")
+        original = fake.search_timecards
+        calls = {"n": 0}
+
+        def unmapped(*a, **k):
+            calls["n"] += 1
+            cards = original(*a, **k)
+            if calls["n"] == 1:            # first day gains an unmappable job
+                return [{**cards[0], "wage": {"title": "Sommelier"}}] + cards[1:]
+            return cards
+
+        fake.search_timecards = unmapped
+        try:
+            out = client.post(f"/api/periods/{anchor}/refresh",
+                              headers=poq["h"]).json()
+        finally:
+            fake.search_timecards = original
+        assert len(out["left_open"]) == 1
+        opened = out["left_open"][0]["date"]
+        assert client.get(f"/api/days/{opened}",
+                          headers=poq["h"]).json()["status"] == "draft"
+        assert opened not in {d["date"] for d in out["moved_days"]}
+        assert out["left_open"][0]["error"]
