@@ -260,7 +260,8 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
     # distributed to the daily pool and the event's own staff would get
     # nothing — which is exactly what happened to 2026-08-17.
     event_tmid = str(settings.get("poq_event_logon_tmid") or "")
-    event = extract_event_money(orders, payments, event_tmid, venue["timezone"])
+    event = extract_event_money(orders, payments, event_tmid, venue["timezone"],
+                                settings["gratuity_service_charge"])
 
     tips = extract_credit_tips(payments, exclude_order_ids=event["order_ids"])
     grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"],
@@ -318,6 +319,16 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
             elif not candidates:
                 issues.append({"severity": "warning", "code": "no_event_bartender",
                                "detail": [], "blocks": []})
+        if event["other_charges"]:
+            # by policy the 3% admin fee goes to the organising manager and
+            # never touches the staff pool, so it is held out — but say so,
+            # rather than letting money vanish from the ticket silently
+            issues.append({
+                "severity": "warning", "code": "event_non_gratuity_charge",
+                "detail": [f"{c['name']} {'' if c['percentage'] is None else c['percentage'] + '% '}"
+                           f"${c['cents'] / 100:.2f}" for c in event["other_charges"]],
+                "blocks": [],
+            })
 
     return {
         "pulled_at": utcnow(),
@@ -328,6 +339,7 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
             "payments": tips["payments"],
             "service_charges": grat["charges"],
             "event_orders": event["orders"],
+            "event_other_charges": event["other_charges"],
             "shifts": labor["shifts"],
             "counts": {"payments": len(payments), "orders": len(orders),
                        "timecards": len(timecards)},

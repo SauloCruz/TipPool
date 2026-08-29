@@ -81,10 +81,11 @@ with:
   remain open in that doc — do not invent them. Still to do: the job-title ->
   role map lives in settings (`poq_job_roles`) with no Setup screen, so a new
   Square job title blocks the day until someone edits the setting; and no
-  `Event Bartender` job exists in Square yet, so a bartender working an event
-  lands in the DAILY pool.
-- **Tests:** `make test` / `.venv/bin/python -m pytest -q` currently passes
-  **519 tests**.
+  `Event Bartender` job exists in Square, so the bartender on duty is drafted
+  into the event pool for the hours overlapping the event window and stays in
+  the daily pool for the rest (owner 2026-08-28).
+- **Tests:** `make test` / `.venv/bin/python -m pytest -q`. Everything must
+  pass before you commit; do not record the count here, it only goes stale.
 - **Live-data safety:** before schema/auth/data-handling work, run
   `make backup`. Recent rollback backups were created in `data/backups/`.
   Do not mutate `data/tippool.sqlite3` casually.

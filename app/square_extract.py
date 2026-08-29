@@ -132,6 +132,29 @@ def extract_credit_tips(payments: list[dict],
 
 # ---------- service charges ----------
 
+def _is_staff_gratuity(sc: dict, want_id: str | None, want_name: str) -> bool:
+    """Is this service charge money owed to staff?
+
+    Square's explicit `AUTO_GRATUITY` type (catalog gratuity charges carry no
+    name on the order), the configured catalog id, or a case-insensitive name
+    match for custom/ad-hoc charges. Anything else on a ticket is a charge the
+    house levies for its own account — the Poquitos policy's 3% administrative
+    fee is the known example — and must never reach a staff pool.
+    """
+    return bool(
+        sc.get("type") == "AUTO_GRATUITY"
+        or (want_id and sc.get("catalog_object_id") == want_id)
+        or (want_name and want_name in (sc.get("name") or "").lower())
+    )
+
+
+def _charge_cents(sc: dict) -> int:
+    applied = sc.get("applied_money")
+    if applied is not None:
+        return _amount(applied)
+    return _amount(sc.get("total_money")) - _amount(sc.get("total_tax_money"))
+
+
 def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
                          payments: list[dict] | None = None,
                          exclude_order_ids: Iterable[str] = ()) -> dict:
@@ -172,18 +195,9 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
         if order.get("id") in skip:
             continue
         for sc in order.get("service_charges", []):
-            matched = (
-                sc.get("type") == "AUTO_GRATUITY"
-                or (want_id and sc.get("catalog_object_id") == want_id)
-                or (want_name and want_name in sc.get("name", "").lower())
-            )
-            if not matched:
+            if not _is_staff_gratuity(sc, want_id, want_name):
                 continue
-            applied = sc.get("applied_money")
-            if applied is not None:
-                amt = _amount(applied)
-            else:  # older payloads: strip tax from the total
-                amt = _amount(sc.get("total_money")) - _amount(sc.get("total_tax_money"))
+            amt = _charge_cents(sc)
             oid = order.get("id")
             refunded = refunded_by_order.get(oid, 0)
             back = 0
@@ -202,7 +216,8 @@ def extract_auto_gratuity(orders: list[dict], grat_cfg: dict,
 # ---------- private events ----------
 
 def extract_event_money(orders: list[dict], payments: list[dict],
-                        event_tmid: str, tz_name: str) -> dict:
+                        event_tmid: str, tz_name: str,
+                        grat_cfg: dict | None = None) -> dict:
     """Private-event money, told apart from the day's ordinary trade by the
     Square logon that rang it.
 
@@ -216,6 +231,13 @@ def extract_event_money(orders: list[dict], payments: list[dict],
 
     Two other things come out of the same orders:
 
+    Only service charges owed to STAFF join the pool — matched the same way
+    the daily auto-gratuity is. The policy's 3% administrative fee goes to the
+    manager who organised the event and "never touches the staff pool", so a
+    charge on the event ticket that is not a gratuity is held out and reported
+    in `other_charges` for the day to flag. Silently pooling it would overpay
+    everyone; silently dropping it would hide money.
+
     * `card_cents` — how much of the pool the card processor actually handled,
       so the fee is withheld from that part only. The 08/17 event was tendered
       EXTERNAL (invoiced), where a blanket fee would have been simply wrong.
@@ -224,16 +246,20 @@ def extract_event_money(orders: list[dict], payments: list[dict],
       paid (owner 2026-08-28). It decides how many of the bartender's hours
       were worked on the event.
     """
+    empty = {"event_service_charge_cents": 0, "event_tips_cents": 0,
+             "card_cents": 0, "order_ids": [], "window": None, "orders": [],
+             "other_charges": []}
     if not event_tmid:
-        return {"event_service_charge_cents": 0, "event_tips_cents": 0,
-                "card_cents": 0, "order_ids": [], "window": None, "orders": []}
+        return dict(empty)
 
     ev_orders = [o for o in orders
                  if o.get("created_by_team_member_id") == event_tmid]
     order_ids = [o["id"] for o in ev_orders if o.get("id")]
     if not ev_orders:
-        return {"event_service_charge_cents": 0, "event_tips_cents": 0,
-                "card_cents": 0, "order_ids": [], "window": None, "orders": []}
+        return dict(empty)
+
+    want_id = (grat_cfg or {}).get("catalog_object_id")
+    want_name = ((grat_cfg or {}).get("name_contains") or "").lower()
 
     pays_by_order: dict[str, list[dict]] = {}
     for p in payments or ():
@@ -241,6 +267,7 @@ def extract_event_money(orders: list[dict], payments: list[dict],
 
     sc_total = tip_total = card_base = 0
     rows = []
+    other: list[dict] = []
     for o in ev_orders:
         oid = o.get("id")
         pays = [p for p in pays_by_order.get(oid, [])
@@ -250,9 +277,17 @@ def extract_event_money(orders: list[dict], payments: list[dict],
         card_paid = sum(_amount(p.get("total_money")) for p in pays
                         if "card_details" in p)
 
-        sc = sum(_amount(c.get("applied_money")) if c.get("applied_money") is not None
-                 else _amount(c.get("total_money")) - _amount(c.get("total_tax_money"))
-                 for c in o.get("service_charges", []))
+        sc = 0
+        for c in o.get("service_charges", []):
+            if _is_staff_gratuity(c, want_id, want_name):
+                sc += _charge_cents(c)
+            elif _charge_cents(c):
+                # the house's own charge (the 3% admin fee, by policy) — out of
+                # the pool, but named so the day can say what it left behind
+                other.append({"order_id": oid,
+                              "name": c.get("name") or c.get("type") or "service charge",
+                              "percentage": c.get("percentage"),
+                              "cents": _charge_cents(c)})
         tip = sum(_amount(p.get("tip_money")) for p in pays)
 
         # Refunds come off the same way as elsewhere: a refund eats the
@@ -289,7 +324,7 @@ def extract_event_money(orders: list[dict], payments: list[dict],
             "card_cents": card_base,
             "order_ids": order_ids,
             "window": {"start_at": start.isoformat(), "end_at": end.isoformat()},
-            "orders": rows}
+            "orders": rows, "other_charges": other}
 
 
 # ---------- timecards ----------

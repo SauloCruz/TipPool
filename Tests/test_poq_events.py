@@ -30,15 +30,22 @@ def money(cents):
 
 
 def order(oid, tmid, sc_cents=0, created="2026-08-17T22:08:02Z",
-          closed="2026-08-18T00:34:42Z"):
+          closed="2026-08-18T00:34:42Z", extra_charges=()):
     return {
         "id": oid, "created_by_team_member_id": tmid,
         "ticket_name": "801 Jake Event", "created_at": created,
         "closed_at": closed,
         "service_charges": ([{"type": "AUTO_GRATUITY", "percentage": "20",
                               "applied_money": money(sc_cents)}]
-                            if sc_cents else []),
+                            if sc_cents else []) + list(extra_charges),
     }
+
+
+def admin_fee(cents, name="Administrative Fee"):
+    """The policy's 3% fee: goes to the manager who organised the event and
+    never touches the staff pool. Square would carry it as a CUSTOM charge."""
+    return {"type": "CUSTOM", "name": name, "percentage": "3",
+            "applied_money": money(cents)}
 
 
 def payment(pid, oid, total, tip=0, refunded=0, card=True):
@@ -69,7 +76,7 @@ class TestEventMoneyIsSeparated:
     ]
 
     def test_event_charge_leaves_the_daily_gratuity(self):
-        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ)
+        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ, {})
         assert ev["event_service_charge_cents"] == 20400
         grat = extract_auto_gratuity(self.ORDERS, {}, self.PAYMENTS,
                                      exclude_order_ids=ev["order_ids"])
@@ -83,38 +90,76 @@ class TestEventMoneyIsSeparated:
         assert grat["auto_gratuity_cents"] == 24500
 
     def test_event_card_tips_leave_the_daily_credit_tips(self):
-        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ)
+        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ, {})
         tips = extract_credit_tips(self.PAYMENTS, exclude_order_ids=ev["order_ids"])
         assert tips["credit_tips_cents"] == 1500
 
     def test_invoiced_event_owes_no_processing_fee(self):
-        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ)
+        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ, {})
         assert ev["card_cents"] == 0
 
     def test_card_paid_event_is_fee_bearing_in_full(self):
         orders = [order("EVT", EVENT_TM, sc_cents=20400)]
         pays = [payment("P", "EVT", 135313, tip=5000)]
-        ev = extract_event_money(orders, pays, EVENT_TM, TZ)
+        ev = extract_event_money(orders, pays, EVENT_TM, TZ, {})
         assert ev["card_cents"] == 20400 + 5000
 
     def test_no_logon_configured_finds_nothing(self):
-        ev = extract_event_money(self.ORDERS, self.PAYMENTS, "", TZ)
+        ev = extract_event_money(self.ORDERS, self.PAYMENTS, "", TZ, {})
         assert ev["order_ids"] == [] and ev["window"] is None
 
     def test_refund_comes_off_the_event_pool(self):
         orders = [order("EVT", EVENT_TM, sc_cents=20400)]
         pays = [payment("P", "EVT", 135313, tip=5000, refunded=135313)]
-        ev = extract_event_money(orders, pays, EVENT_TM, TZ)
+        ev = extract_event_money(orders, pays, EVENT_TM, TZ, {})
         # a fully refunded check returns its whole charge and tip
         assert ev["event_service_charge_cents"] == 0
         assert ev["event_tips_cents"] == 0
+
+
+class TestNonGratuityChargesStayOutOfThePool:
+    """The 3% administrative fee is charged in addition and is the organising
+    manager's — pooling it would overpay every person on the event."""
+
+    ORDERS = [order("EVT", EVENT_TM, sc_cents=20400,
+                    extra_charges=[admin_fee(3060)])]
+    PAYMENTS = [payment("P", "EVT", 138373, card=False)]
+
+    def test_only_the_gratuity_reaches_the_pool(self):
+        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ, {})
+        assert ev["event_service_charge_cents"] == 20400
+
+    def test_the_held_out_charge_is_reported_not_dropped(self):
+        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ, {})
+        assert [(c["name"], c["cents"]) for c in ev["other_charges"]] \
+            == [("Administrative Fee", 3060)]
+
+    def test_a_custom_charge_named_as_gratuity_is_still_staff_money(self):
+        """Some venues ring gratuity as a custom charge; the configured name
+        match is what says so."""
+        orders = [order("EVT", EVENT_TM, sc_cents=0,
+                        extra_charges=[{"type": "CUSTOM", "name": "Event Gratuity",
+                                        "percentage": "20",
+                                        "applied_money": money(20400)}])]
+        ev = extract_event_money(orders, self.PAYMENTS, EVENT_TM, TZ,
+                                 {"name_contains": "gratuity"})
+        assert ev["event_service_charge_cents"] == 20400
+        assert ev["other_charges"] == []
+
+    def test_the_fee_never_reaches_a_payout(self):
+        ev = extract_event_money(self.ORDERS, self.PAYMENTS, EVENT_TM, TZ, {})
+        r = compute_event_points_hours(
+            service_charge=ev["event_service_charge_cents"] / 100,
+            shifts=[Shift("a", "EVENT_SERVER", 4), Shift("b", "LINE_COOK", 5)],
+            card_pool=0)
+        assert sum(r.payout_cents.values()) == 20400
 
 
 class TestInferredWindow:
     def test_starts_at_the_hour_before_the_first_order_and_ends_when_paid(self):
         ev = extract_event_money([order("EVT", EVENT_TM, sc_cents=20400)],
                                  [payment("P", "EVT", 100, card=False)],
-                                 EVENT_TM, TZ)
+                                 EVENT_TM, TZ, {})
         # 22:08Z = 15:08 PT -> 15:00; paid 00:34Z = 17:34 PT
         assert ev["window"]["start_at"].startswith("2026-08-17T15:00:00")
         assert ev["window"]["end_at"].startswith("2026-08-17T17:34:42")
@@ -123,7 +168,7 @@ class TestInferredWindow:
         ev = extract_event_money(
             [order("EVT", EVENT_TM, sc_cents=100,
                    created="2026-08-17T22:05:00Z", closed="2026-08-17T22:20:00Z")],
-            [], EVENT_TM, TZ)
+            [], EVENT_TM, TZ, {})
         assert ev["window"]["start_at"] < ev["window"]["end_at"]
 
 
@@ -299,3 +344,26 @@ class TestEventProcessingFee:
     def test_card_portion_cannot_exceed_the_pool(self):
         with pytest.raises(ValueError):
             compute_event_points_hours(service_charge=204, card_pool=500)
+
+
+class TestSilentCorrectionsAreFlagged:
+    """A finalized snapshot has to explain the figure it paid, so anything the
+    engine quietly caps must show up as a flag."""
+
+    def test_more_event_hours_than_the_bartender_clocked(self):
+        out = compute(event_bartender_employee_id=1, event_bartender_hours=99)
+        assert out["flags"]["event_bartender_hours_capped"] is True
+        # still computes, still conserves — capped, not refused
+        assert sum(p["event_cents"] for p in out["people"]) == 20400
+
+    def test_hours_within_the_shift_raise_nothing(self):
+        out = compute(event_bartender_employee_id=1, event_bartender_hours=2.58)
+        assert "event_bartender_hours_capped" not in out["flags"]
+
+    def test_card_portion_larger_than_the_event_money(self):
+        out = compute(event_card_cents=999999)
+        assert out["flags"]["event_card_portion_capped"] is True
+
+    def test_card_portion_within_the_pool_raises_nothing(self):
+        out = compute(event_card_cents=20400)
+        assert "event_card_portion_capped" not in out["flags"]

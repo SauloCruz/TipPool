@@ -105,9 +105,11 @@ DEFAULTS = {
     "poq_foh_pct": "80",
     # event support tip-out, per role group, of the event's FOH portion
     "poq_support_pct": "3",
-    # Card processing fee withheld from CREDIT tips before pooling (owner
-    # 2026-08-13). "0" = no deduction; set the venue's real processor rate in
-    # Setup. Cash tips are never touched — no processor handles them.
+    # Card processing fee withheld before pooling, from EVERYTHING the card
+    # processor handled — credit tips AND auto-gratuity (owner 2026-08-14,
+    # widening the 2026-08-13 credit-tips-only rule). Each pool bears its own
+    # share. Only CASH is exempt: no processor handles it. "0" = no deduction;
+    # set the venue's real processor rate in Setup.
     "poq_card_fee_pct": "0",
     # Square team member whose orders mark a PRIVATE EVENT. Poquitos rings
     # contracted events under a shared "Event Host" pin (owner 2026-08-28), so

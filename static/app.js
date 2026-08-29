@@ -131,6 +131,8 @@ const ISSUE_TEXT = {
   role_mismatch: (d) => `Role mismatch (assigned role wins): ${d.join("; ")}`,
   pick_event_bartender: (d) =>
     `More than one bartender was on during the event (${d.join(", ")}). Pick the one who worked it under Private event — the app will not guess.`,
+  event_non_gratuity_charge: (d) =>
+    `The event ticket carries ${d.length > 1 ? "charges" : "a charge"} that ${d.length > 1 ? "are" : "is"} not gratuity (${d.join(", ")}). Held OUT of the event pool — the 3% administrative fee is the organising manager's and never touches staff. Check it is not a staff charge under an unexpected name.`,
   no_event_bartender: () =>
     "An event ran but no bartender's shift overlapped it — check the event times if a bartender should share the event pool.",
 };
@@ -157,6 +159,10 @@ const POQ_FLAG_TEXT = {
     "Event money is entered but nobody clocked in on an event job, and no bartender is drafted — the service pool has nobody to pay.",
   event_no_boh_worked:
     "The event's 20% kitchen portion has nobody to pay — no kitchen hours that day.",
+  event_bartender_hours_capped:
+    "The event hours entered for the bartender are more than they clocked as a bartender that day — only the hours actually worked were credited. Check the hours, or the clock-in.",
+  event_card_portion_capped:
+    "The card-handled portion pulled from Square is larger than the event money now entered, so the processing fee was taken on the smaller figure. Re-pull if the event money was edited by mistake.",
 };
 
 const LF_INFO_FLAGS = new Set(["no_host_resplit"]);

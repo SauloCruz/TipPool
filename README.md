@@ -154,10 +154,10 @@ Deliberately boring, in the best way:
 engine/     pure calculation models (POOL_HOURS, PERCENT_TIPOUT, POINTS_HOURS, clipping, labor hours)
 app/        FastAPI API: days, snapshots, periods, exports, Square sync, RBAC, audit
 static/     mobile-first SPA (vanilla JS, hash routing, no build step)
-Tests/      519 tests: golden days, engine properties, API contracts, sync, RBAC
+Tests/      golden days, engine properties, API contracts, sync, RBAC
 ```
 
-Schema migrations are versioned and applied automatically at boot (currently **v8**).
+Schema migrations are versioned and applied automatically at boot (currently **v9**).
 Secrets stay server-side; the Square tokens never reach the browser.
 
 ---
@@ -264,7 +264,7 @@ working on the app should use git from the start of the task:
 **In production at three venues.** Daily entries, Square pulls, finalized snapshots,
 weekly cash payouts, and payroll exports are live. The engine's golden-file suite
 reproduces three historical pay periods — 46 days — from the original spreadsheet to the
-cent, and the full suite stands at **452 passing tests**.
+cent. Run `make test` for the current suite; a hand-copied count only ever goes stale.
 
 Historical employee data in the public test fixtures is pseudonymized.
 

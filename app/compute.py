@@ -341,7 +341,7 @@ EMPTY_INPUTS_POQ = {
 EMPTY_INPUTS_BY_MODEL["POINTS_HOURS"] = EMPTY_INPUTS_POQ
 
 
-def _draft_event_bartender(shifts: list, inputs: dict) -> list:
+def _draft_event_bartender(shifts: list, inputs: dict) -> tuple[list, dict]:
     """Move the drafted bartender's event hours onto an EVENT_BARTENDER shift.
 
     Poquitos has no Event Bartender job in Square, so the bartender working a
@@ -350,11 +350,17 @@ def _draft_event_bartender(shifts: list, inputs: dict) -> list:
     overlap the event go to the event, the rest stay in the daily pool. Moving
     the hours between roles is all that takes: EVENT_BARTENDER sits on the
     EVENT side, which the daily engine already skips.
+
+    Returns the shifts and any flags. Asking for more event hours than the
+    bartender actually clocked is capped rather than refused — the day still
+    computes — but it is FLAGGED, because a finalized snapshot has to explain
+    the figure it paid, and a silently shortened number explains nothing.
     """
+    flags: dict[str, bool] = {}
     eid = inputs.get("event_bartender_employee_id")
     hours = float(inputs.get("event_bartender_hours") or 0)
     if not eid or hours <= 0:
-        return shifts
+        return shifts, flags
     eid = str(int(eid))
     out, moved = [], 0.0
     for sh in shifts:
@@ -368,7 +374,10 @@ def _draft_event_bartender(shifts: list, inputs: dict) -> list:
     if moved > 0:
         out.append(Shift(employee=eid, role="EVENT_BARTENDER",
                          hours=round(moved, 2)))
-    return out
+    if round(moved, 2) < round(hours, 2):
+        # they were not on the clock as a bartender for all the hours asked for
+        flags["event_bartender_hours_capped"] = True
+    return out, flags
 
 
 def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
@@ -394,7 +403,7 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
     if problems:
         raise DayValidationError("; ".join(problems))
 
-    shifts = _draft_event_bartender(shifts, inputs)
+    shifts, draft_flags = _draft_event_bartender(shifts, inputs)
 
     excluded = {str(eid) for eid, e in employees.items() if e["pool_role"] == "EXCLUDED"}
     try:
@@ -411,6 +420,14 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
 
     event_pool_cents = (int(inputs.get("event_service_charge_cents") or 0)
                         + int(inputs.get("event_tips_cents") or 0))
+    # The card-handled portion comes from the pull; if the manager then edits
+    # the event money down, the stored figure can exceed the pool. Cap it —
+    # a fee on money that is not there would be wrong — and flag it, so the
+    # snapshot says why the fee base is not what was pulled.
+    event_card_cents = int(inputs.get("event_card_cents") or 0)
+    if event_card_cents > event_pool_cents:
+        event_card_cents = event_pool_cents
+        draft_flags["event_card_portion_capped"] = True
     event = None
     if event_pool_cents:
         event = compute_event_points_hours(
@@ -419,8 +436,7 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
             shifts=shifts, role_points=role_points, role_side=role_side,
             foh_pct=Decimal(str(foh_pct)), support_pct=Decimal(str(support_pct)),
             card_fee_pct=Decimal(str(card_fee_pct)),
-            card_pool=_dollars(min(int(inputs.get("event_card_cents") or 0),
-                                   event_pool_cents)),
+            card_pool=_dollars(event_card_cents),
         )
 
     def name(eid: str) -> str:
@@ -490,7 +506,7 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
             "foh_points_total": day.foh_points_total,
             "boh_points_total": day.boh_points_total,
         },
-        "flags": dict(day.flags),
+        "flags": {**day.flags, **draft_flags},
         "event_staff_unpaid": sorted(event_staff),
         "people": people,
     }
