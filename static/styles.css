@@ -660,3 +660,8 @@ td.tot, th.tot { font-weight: 700; }
 
 /* Contract labour: no Square account, hours typed by hand. */
 .rolechip.contract { background: rgba(212, 162, 78, .16); color: var(--warn, #d4a24e); }
+
+/* Kitchen contract-labour hours: recorded for pay, not for the even split. */
+.bohhours { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;
+            padding: 2px 6px 8px; }
+.bohhours .hint { flex: 1; }

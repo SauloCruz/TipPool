@@ -351,7 +351,14 @@ async function renderDay(dateArg) {
                        "event_food_sales_cents", "event_tips_cents"]) {
       out[key] = centsFromInput(moneyEls[key]);
     }
-    boh.forEach((e) => { if (bohChecks[e.id].checked) out.boh_worked.push(e.id); });
+    boh.forEach((e) => {
+      if (bohChecks[e.id].checked) out.boh_worked.push(e.id);
+      // recorded for pay; the kitchen split itself is per head, not per hour
+      if (e.is_contractor && hourEls[e.id]) {
+        const h = parseFloat(hourEls[e.id].value);
+        if (h > 0) out.contractor_hours[e.id] = h;
+      }
+    });
     foh.forEach((e) => {
       const h = parseFloat(hourEls[e.id].value);
       // A contractor's hours are always typed, and they keep their own field:
@@ -650,6 +657,33 @@ async function renderDay(dateArg) {
         scheduleSave(); refreshAll();
       });
       bohCard.append(chip);
+      // Kitchen contract labour needs hours too, but for a different reason:
+      // the kitchen share is an even split, so hours never weigh it. These
+      // hours are what the venue pays them directly (hours x rate), and
+      // without somewhere to type them a contractor's wages are invisible.
+      if (e.is_contractor) {
+        const src = inputs.contractor_hours || {};
+        const hidden = el("input", { type: "hidden",
+          value: String(src[e.id] ?? src[String(e.id)] ?? 0) });
+        hourEls[e.id] = hidden;
+        const inp = el("input", { inputmode: "decimal", type: "text",
+          value: String(parseFloat(hidden.value) || 0),
+          style: "width:64px;text-align:right",
+          ...(finalized ? { disabled: "" } : {}) });
+        inp.addEventListener("input", () => {
+          hidden.value = String(Math.max(0, parseFloat(inp.value) || 0));
+          scheduleSave();
+        });
+        inp.addEventListener("blur", () => {
+          inp.value = String(parseFloat(hidden.value) || 0);
+        });
+        bohCard.append(el("div", { class: "bohhours" },
+          el("span", { class: "rolechip contract" }, "contract"),
+          inp, el("span", { class: "unit" }, "h"),
+          el("span", { class: "hint" },
+            e.hourly_rate_cents ? `${fmt(e.hourly_rate_cents)}/h — pay only, the kitchen share is an even split`
+                                : "pay only — the kitchen share is an even split")));
+      }
     }
     if (!boh.length) bohCard.append(el("div", { class: "note" }, "No BOH staff yet."));
     p.append(bohCard);
@@ -3241,7 +3275,8 @@ async function renderEmployees() {
     contractFields,
     el("div", { style: "margin-top:12px" }, addBtn),
     el("div", { class: "note" }, "EXCLUDED staff are hard-blocked from every pool (WA law). Days that reference them will refuse to compute."),
-    el("div", { class: "note" }, "Contract labour shares the tip pool like anyone else, but never appears on the payroll entry sheet. When you move someone onto payroll, link their Square account and clear the contract flag — the same record keeps every night they worked.")));
+    el("div", { class: "note" }, "Contract labour shares the tip pool like anyone else, but never appears on the payroll entry sheet. When you move someone onto payroll, link their Square account and clear the contract flag — the same record keeps every night they worked."),
+    el("div", { class: "note" }, "The pool role decides where their share comes from. FOH shares the hourly pool, weighted by the hours you type; BOH shares the kitchen split evenly per head, so their hours are recorded for pay only. Someone working the host station is FOH — mark the Door toggle on the night, which halves their tip credit per hour.")));
 }
 
 /* ---------- settings / setup (admin, M3) ---------- */

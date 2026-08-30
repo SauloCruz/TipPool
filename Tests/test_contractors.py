@@ -199,3 +199,58 @@ class TestContractorsStayOffPayroll:
         csv = client.get(f"/api/periods/{self.DAY}/export.csv",
                          headers=tl["h"]).text
         assert "Angelica" not in csv
+
+
+class TestKitchenContractLabour:
+    """Angelica is kitchen, not front of house (owner 2026-08-30). Her share
+    comes from the even kitchen split; her hours are only what she is paid."""
+
+    DAY = "2026-09-12"
+
+    def _setup(self, client, tl):
+        emps = {e["display_name"]: e for e in
+                client.get("/api/employees", headers=tl["h"]).json()}
+        for name, role in (("Angie Kitchen", "BOH"), ("Benito", "BOH")):
+            if name not in emps:
+                body = {"display_name": name, "pool_role": role}
+                if name.startswith("Angie"):
+                    body |= {"is_contractor": True, "hourly_rate_cents": 2200}
+                client.post("/api/employees", headers=tl["h"], json=body)
+        return {e["display_name"]: e for e in
+                client.get("/api/employees", headers=tl["h"]).json()}
+
+    def _day(self, client, tl, emps, **extra):
+        body = {"food_sales_cents": 100000, "credit_tips_cents": 60000,
+                "foh_hours": {emps["Bree"]["id"]: 6},
+                "boh_worked": [emps["Benito"]["id"], emps["Angie Kitchen"]["id"]],
+                "contractor_hours": {emps["Angie Kitchen"]["id"]: 6}}
+        body.update(extra)
+        return client.put(f"/api/days/{self.DAY}", headers=tl["h"],
+                          json=body).json()["computed"]
+
+    def test_she_shares_the_kitchen_pool_evenly(self, client, tl):
+        emps = self._setup(client, tl)
+        out = self._day(client, tl, emps)
+        rows = {r["name"]: r for r in out["boh"]}
+        assert rows["Angie Kitchen"]["share_cents"] == rows["Benito"]["share_cents"]
+
+    def test_her_hours_never_reach_the_foh_pool(self, client, tl):
+        emps = self._setup(client, tl)
+        out = self._day(client, tl, emps)
+        assert "Angie Kitchen" not in {r["name"] for r in out["foh"]}
+        # and the FOH pool is unchanged by her being there at all
+        without = self._day(client, tl, emps, contractor_hours={})
+        assert ({r["name"]: r["tips_cents"] for r in out["foh"]}
+                == {r["name"]: r["tips_cents"] for r in without["foh"]})
+
+    def test_her_hours_still_pay_her(self, client, tl):
+        emps = self._setup(client, tl)
+        self._day(client, tl, emps)
+        client.post(f"/api/days/{self.DAY}/finalize", headers=tl["h"])
+        rows = {r["name"]: r for r in client.get(
+            f"/api/periods/{self.DAY}/contractors", headers=tl["h"]
+        ).json()["contractors"]}
+        a = rows["Angie Kitchen"]
+        assert a["hours"] == 6 and a["wages_cents"] == 13200   # 6 h x $22
+        assert a["tips_cents"] > 0, "her kitchen share is money she is owed"
+        assert a["total_cents"] == a["wages_cents"] + a["tips_cents"]

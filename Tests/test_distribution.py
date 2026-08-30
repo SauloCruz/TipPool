@@ -283,3 +283,53 @@ class TestContractLabour:
         out = self._day(foh_hours={1: 6, 2: 2}, contractor_hours={2: 4})
         rows = {r["name"]: r for r in out["foh"]}
         assert rows["Angelica"]["hours"] == 6
+
+
+class TestContractLabourSide:
+    """A contractor's pool side decides where their share comes from — FOH
+    hours weigh the FOH pool, kitchen shares are an even split and hours
+    never enter it (owner 2026-08-30). Angelica is kitchen, Ray works the
+    host station."""
+
+    EMPS = {
+        1: {"display_name": "Bree", "pool_role": "FOH"},
+        2: {"display_name": "Ray", "pool_role": "FOH"},
+        3: {"display_name": "Benito", "pool_role": "BOH"},
+        4: {"display_name": "Angelica", "pool_role": "BOH"},
+    }
+
+    def _day(self, **extra):
+        inputs = {**EMPTY_INPUTS, "food_sales_cents": 100000,
+                  "credit_tips_cents": 40000, "boh_worked": [3],
+                  "foh_hours": {1: 6}}
+        inputs.update(extra)
+        return compute_outputs(inputs, self.EMPS)
+
+    def test_kitchen_contractor_hours_never_dilute_the_foh_pool(self):
+        base = self._day()
+        with_angelica = self._day(contractor_hours={4: 6})
+        bree = {r["name"]: r for r in base["foh"]}["Bree"]["tips_cents"]
+        bree2 = {r["name"]: r for r in with_angelica["foh"]}["Bree"]["tips_cents"]
+        assert bree == bree2, "a kitchen contractor must not touch the FOH pool"
+        assert "Angelica" not in {r["name"] for r in with_angelica["foh"]}
+
+    def test_kitchen_contractor_shares_the_kitchen_split_when_rostered(self):
+        out = self._day(boh_worked=[3, 4], contractor_hours={4: 6})
+        rows = {r["name"]: r for r in out["boh"]}
+        assert rows["Angelica"]["share_cents"] == rows["Benito"]["share_cents"]
+        assert sum(r["share_cents"] for r in out["boh"]) \
+            == out["totals"]["boh_allocation_cents"]
+
+    def test_foh_contractor_still_weighs_the_foh_pool(self):
+        out = self._day(contractor_hours={2: 6})
+        rows = {r["name"]: r for r in out["foh"]}
+        assert rows["Ray"]["tips_cents"] == rows["Bree"]["tips_cents"]
+
+    def test_a_host_contractor_takes_the_door_rate(self):
+        """Ray works the host station, so his hours earn tl_door_weight."""
+        out = self._day(contractor_hours={2: 6}, door_worked=[2])
+        rows = {r["name"]: r for r in out["foh"]}
+        assert rows["Ray"]["door"] is True
+        assert rows["Ray"]["tips_cents"] < rows["Bree"]["tips_cents"]
+        assert sum(r["tips_cents"] for r in out["foh"]) \
+            == out["totals"]["foh_pool_cents"]

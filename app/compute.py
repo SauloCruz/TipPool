@@ -98,13 +98,19 @@ def compute_outputs(inputs: dict, employees: dict[int, dict],
     the server stores them; hours arriving here are already rounded."""
     boh_ids = [int(e) for e in inputs["boh_worked"]]
     foh_hours = {int(k): v for k, v in inputs["foh_hours"].items()}
-    # Contract labour earns its pool share exactly like anyone else; only the
-    # route the hours arrive by is different, so merge and forget.
+    # Contract labour hours serve two different purposes, and conflating them
+    # was a bug: for an FOH contractor the hours weigh their share of the FOH
+    # pool exactly like anyone else's, but a KITCHEN contractor's share comes
+    # from the even split among `boh_worked` — hours never enter it. Theirs
+    # are recorded only so the app can work out what to pay them directly
+    # (hours x rate), so they must NOT reach the FOH pool or every FOH share
+    # would be diluted by someone who was never in it.
     contractor_hours = {int(k): v
                         for k, v in (inputs.get("contractor_hours") or {}).items()
                         if v}
     for eid, h in contractor_hours.items():
-        foh_hours[eid] = foh_hours.get(eid, 0) + h
+        if (employees.get(eid) or {}).get("pool_role") == "FOH":
+            foh_hours[eid] = foh_hours.get(eid, 0) + h
     # door_worked is absent from snapshots predating the 2026-07-29 ruling
     door_ids = {int(e) for e in inputs.get("door_worked") or ()}
     # Weights the pull derived from each shift's Square job. The manual
