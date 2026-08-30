@@ -299,3 +299,47 @@ class TestTakeHomeStubs:
         assert ".stubs.per4 .stub:nth-child(4n)" in CSS
         # a slip must never be split across two sheets
         assert "page-break-inside: avoid" in CSS
+
+
+class TestDateNavigationOnEveryDayScreen:
+    """All three day screens navigate dates the same way (owner 2026-08-30).
+    Tavern Law had only an invisible tap target on the date itself and
+    La Fontana had only the button — neither is discoverable on its own, and
+    a manager fixing last Tuesday should not have to go via the Period
+    screen whichever venue they are in."""
+
+    SCREENS = ("renderDay", "renderDayLF", "renderDayPoq")
+
+    @staticmethod
+    def block(name):
+        i = APP_JS.index(f"function {name}(")
+        m = re.search(r"\n(?:async )?function ", APP_JS[i + 10:])
+        return APP_JS[i:i + 10 + m.start()] if m else APP_JS[i:]
+
+    def test_every_day_screen_has_all_three_affordances(self):
+        for name in self.SCREENS:
+            blk = self.block(name)
+            assert "shift(-1)" in blk and "shift(1)" in blk, f"{name}: arrows"
+            assert "datePickButton(datePick)" in blk, f"{name}: picker button"
+            assert "showPicker" in blk, f"{name}: tap the date"
+
+    def test_the_picker_button_is_one_shared_helper(self):
+        # so the three screens cannot drift apart again
+        assert APP_JS.count("function datePickButton(") == 1
+        # the trailing comma excludes the definition line, which also
+        # contains the call-shaped substring
+        assert APP_JS.count("datePickButton(datePick),") == 3
+
+    def test_the_hidden_input_is_reachable_not_pointer_blocked(self):
+        """A 0x0 or pointer-events:none input cannot be tapped, which is how
+        La Fontana ended up without the affordance."""
+        for name in self.SCREENS:
+            blk = self.block(name)
+            picker = blk[blk.index('type: "date"'):][:260]
+            assert "pointer-events:none" not in picker, name
+            assert "width:0" not in picker, name
+
+    def test_navigating_keeps_you_on_the_day_route(self):
+        for name in self.SCREENS:
+            blk = self.block(name)
+            assert "location.hash = `#/day/${datePick.value}`" in blk, name

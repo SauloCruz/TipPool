@@ -421,9 +421,14 @@ async function renderDay(dateArg) {
   const dayDate = new Date(dateStr + "T12:00:00");
   const nice = dayDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   const caption = el("div", { class: "hint" }, "");
+  // Same date navigation as the other two day screens: step a day at a time,
+  // tap the date itself, or use the picker button — the invisible tap target
+  // alone is not discoverable (owner 2026-08-30).
   const datePick = el("input", { type: "date", value: dateStr,
-    style: "position:absolute;opacity:0;width:1px;height:1px;min-height:0;padding:0;border:0" });
-  datePick.addEventListener("change", () => { location.hash = `#/day/${datePick.value}`; });
+    style: "position:absolute;inset:0;opacity:0;width:100%;height:100%" });
+  datePick.addEventListener("change", () => {
+    if (datePick.value) location.hash = `#/day/${datePick.value}`;
+  });
   const shift = (days) => {
     const d = new Date(dateStr + "T12:00:00");
     d.setDate(d.getDate() + days);
@@ -436,6 +441,7 @@ async function renderDay(dateArg) {
           nice), datePick, caption),
       el("div", { class: "row" },
         el("button", { class: "ghost small", onclick: () => shift(-1) }, "‹"),
+        datePickButton(datePick),
         el("button", { class: "ghost small", onclick: () => shift(1) }, "›"),
         el("span", { class: `badge ${day.status}` }, day.status.replace("_", " ")))),
   );
@@ -1194,13 +1200,15 @@ async function renderDayLF(dateArg) {
     location.hash = `#/day/${d.toISOString().slice(0, 10)}`;
   };
   const datePick = el("input", { type: "date", value: dateStr,
-    style: "position:absolute;width:0;height:0;opacity:0;pointer-events:none" });
+    style: "position:absolute;inset:0;opacity:0;width:100%;height:100%" });
   datePick.addEventListener("change", () => {
     if (datePick.value) location.hash = `#/day/${datePick.value}`;
   });
   view.append(el("div", { class: "row spread", style: "margin:6px 2px 12px" },
     el("div", { style: "position:relative" },
-      el("h1", { style: "margin:0" }, nice), caption, datePick),
+      el("h1", { style: "margin:0", onclick: () => {
+        try { datePick.showPicker(); } catch { datePick.focus(); } } }, nice),
+      caption, datePick),
     el("div", { class: "row" },
       el("button", { class: "ghost small", onclick: () => shift(-1) }, "‹"),
       datePickButton(datePick),
