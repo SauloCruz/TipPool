@@ -61,35 +61,65 @@ class TestRoutes:
         assert "classic view" not in APP_JS
 
 
-class TestStepperStructure:
-    def test_four_steps(self):
-        assert '["Confirm", "Enter", "Review", "Lock"]' in APP_JS
+class TestConsolidatedDayScreen:
+    """Tavern Law's day screen is ONE page, not a four-step wizard (owner
+    2026-08-30). Square pulls six of the seven daily figures now, so the
+    walk-through was mostly clicking past values that were already correct.
 
-    def test_footer_labels(self):
-        for label in ["Confirm & continue", "Confirm $0 cash & continue",
-                      "Review distribution", "Go to finalize", "Finalize — lock",
-                      "Resolve clock-out to continue"]:
-            assert label in APP_JS, label
+    The wizard's per-step gates were real safeguards, so they must survive the
+    consolidation as blocks on the only irreversible action. These assert they
+    are still there — losing one silently is how a $0 cash night or a missing
+    clock-out gets locked in unnoticed.
+    """
 
-    def test_clockout_resolution_affordances(self):
+    SCREEN = APP_JS.split("async function renderDay(")[1].split(
+        "async function renderDayLF(")[0]
+
+    def test_no_step_wizard_left(self):
+        """Scoped to the Tavern Law screen on purpose: La Fontana still runs
+        its own four-step stepper and keeps its labels."""
+        assert "const STEP_LABELS" not in APP_JS
+        for gone in ("Confirm & continue", "Review distribution ›",
+                     "Go to finalize", "class: \"rail\"", "goTo("):
+            assert gone not in self.SCREEN, gone
+
+    def test_every_section_is_on_the_page(self):
+        for label in ["Tonight's money — from Square", "Hours & manual entries",
+                      "Distribution", "What gets locked"]:
+            assert label in self.SCREEN, label
+
+    def test_missing_clockout_blocks_finalize(self):
+        assert "to finalize" in self.SCREEN
+        assert "unresolvedClockouts()" in self.SCREEN
         assert "Record 0h — worked but never clocked out" in APP_JS
         assert "Missing clock-out — enter hours or record 0h" in APP_JS
 
+    def test_zero_cash_still_needs_an_explicit_yes(self):
+        """The gate became two presses of one button rather than two screens,
+        but the manager still has to say so."""
+        assert "Confirm $0 cash tips, then finalize" in self.SCREEN
+        assert "cashGateOpen()" in self.SCREEN
+
+    def test_unmapped_mappings_still_block(self):
+        assert "Blocked — fix mappings in Setup" in self.SCREEN
+
     def test_lock_summary_items(self):
         for text in ["Clean day — straight from Square", "Zero cash tips confirmed",
-                     "clock-out resolved", "Locking in"]:
+                     "clock-out resolved", "What gets locked"]:
             assert text in APP_JS, text
 
-    def test_no_hour_steppers_in_new_screen(self):
-        """Owner ruling: decimal keypad only — the stepper screen must not
-        create ±0.25 bump buttons."""
-        new_screen = APP_JS.split("async function renderDay(")[1].split(
-            "async function renderDayLF(")[0]
-        assert "0.25" not in new_screen
-        assert 'inputmode: "decimal"' in new_screen
+    def test_event_block_collapses_but_opens_itself_when_it_matters(self):
+        """A $0 section is scroll between the manager and the button — but an
+        unattached deposit is money nobody pays out, so it must not hide."""
+        assert "nothing tonight" in self.SCREEN
+        assert "deposits" in self.SCREEN
+
+    def test_no_hour_steppers(self):
+        """Owner ruling: decimal keypad only — no ±0.25 bump buttons."""
+        assert "0.25" not in self.SCREEN
+        assert 'inputmode: "decimal"' in self.SCREEN
 
     def test_compliance_ui_preserved(self):
-        # provenance + revert + plain-english warnings still present
         for token in ["ISSUE_TEXT", "FLAG_TEXT", "revert", "blocked_fields",
                       "src override", "severity"]:
             assert re.search(token.replace(" ", r"[\s\S]{0,40}"), APP_JS), token

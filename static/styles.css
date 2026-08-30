@@ -649,3 +649,11 @@ td.tot, th.tot { font-weight: 700; }
 .maprows { display: grid; gap: 2px; }
 .maprows .row { padding: 6px 0; border-bottom: 1px solid var(--line); }
 .maprows .row:last-child { border-bottom: 0; }
+
+/* A section header that opens and closes. Used for the event block on the
+   Tavern Law day screen, which reads $0 on most nights. */
+.sectoggle {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  display: block; width: 100%; text-align: left;
+}
+.sectoggle:hover { color: var(--fg); }

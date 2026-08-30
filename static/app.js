@@ -300,7 +300,6 @@ const MONEY_FIELDS = [
    Confirm → Enter → Review → Lock. Same API, same collectInputs shape,
    same debounced PUT; steps are local view state only. */
 
-const STEP_LABELS = ["Confirm", "Enter", "Review", "Lock"];
 const STEPPER_MONEY = [
   ["food_sales_cents", "Food sales (non-alcohol)"],
   ["credit_tips_cents", "Credit card tips"],
@@ -322,7 +321,6 @@ async function renderDay(dateArg) {
   const sqVal = sq?.values || {};
 
   /* ---- local view state ---- */
-  let step = finalized ? 4 : 1;
   let computed = day.computed;
   let cashConfirmed = false;
   const clockResolved = new Set(); // employee ids acknowledged (0h or edited)
@@ -335,6 +333,7 @@ async function renderDay(dateArg) {
 
   /* ---- shared save/compute plumbing (same PUT payload as legacy) ---- */
   const moneyEls = {}, hourEls = {}, bohChecks = {}, doorChecks = {};
+  const hourFilters = [];
   /** Round hours UP to the next whole increment, mirroring the server
    *  (engine.round_hours_up). Float-safe: work in increment steps. */
   function roundHoursUp(h) {
@@ -425,23 +424,15 @@ async function renderDay(dateArg) {
         el("span", { class: `badge ${day.status}` }, day.status.replace("_", " ")))),
   );
 
-  /* ---- progress rail ---- */
-  const rail = el("div", { class: "rail" });
+  // One screen, not a four-step wizard (owner 2026-08-30). Square now pulls
+  // six of the seven daily figures, so the walk-through was mostly clicking
+  // "next" past values that were already right. Everything is on the page and
+  // the checks that used to gate each step now gate the Finalize button.
   function renderRail() {
-    rail.textContent = "";
-    for (let i = 1; i <= 4; i++) {
-      if (i > 1) rail.append(el("div", { class: `conn ${step >= i || finalized ? "done" : ""}` }));
-      const state = finalized ? "done" : i < step ? "done" : i === step ? "current" : "";
-      const dot = el("button", { class: `dot ${state}`, type: "button",
-                                 ...(finalized ? { disabled: "" } : {}) },
-        el("span", { class: "circle" }, state === "done" ? "✓" : String(i)),
-        el("span", { class: "lbl" }, STEP_LABELS[i - 1]));
-      if (!finalized) dot.addEventListener("click", () => goTo(i));
-      rail.append(dot);
-    }
-    caption.textContent = finalized ? "Finalized" : `Step ${step} of 4 · ${STEP_LABELS[step - 1]}`;
+    caption.textContent = finalized
+      ? `Finalized ${day.finalized_at?.slice(0, 10) || ""}`
+      : `${ME.venue.name} · hourly tip pool`;
   }
-  view.append(rail);
 
   /* blocking issues are unmissable on every step */
   for (const issue of (sq?.issues || []).filter((i) => i.severity === "blocking")) {
@@ -456,7 +447,7 @@ async function renderDay(dateArg) {
   /* ===== STEP 1 — Confirm ===== */
   {
     const p = panes[1];
-    p.append(el("h2", { class: "stephead" }, "Confirm what Square pulled"),
+    p.append(el("div", { class: "seclabel" }, "Tonight's money — from Square"),
              el("p", { class: "stepsub" }, "Edit any value to override — the badge flips and you can revert."));
     if (!finalized) {
       const pullBtn = el("button", { class: "ghost small" }, "⟳ Pull from Square");
@@ -508,7 +499,7 @@ async function renderDay(dateArg) {
   const hourRows = {};
   {
     const p = panes[2];
-    p.append(el("h2", { class: "stephead" }, "Hours & manual entries"),
+    p.append(el("div", { class: "seclabel" }, "Hours & manual entries"),
              el("p", { class: "stepsub" }, "Most nights you touch nothing here."));
     p.append(el("div", { class: "seclabel" }, "FOH — tippable hours"));
     const hoursCard = el("div", { class: "card", style: "padding:4px 12px" });
@@ -600,6 +591,36 @@ async function renderDay(dateArg) {
     if (!foh.length) hoursCard.append(el("div", { class: "note" }, "No FOH staff yet — add them on the Staff screen."));
     p.append(hoursCard);
 
+    // Most of the roster did not work tonight, and on one screen twenty rows
+    // of 0 h sit between the manager and the Finalize button. Show who worked;
+    // keep everyone else one tap away, because hours still have to be typeable
+    // for someone Square missed. A row is kept visible when it has hours, is
+    // awaiting a clock-out decision, or is marked as a door shift — anything
+    // that still needs a human.
+    const restBtn = el("button", { class: "ghost small", type: "button" });
+    let showAll = false;
+    hoursCard.after(restBtn);
+    function applyHourFilter() {
+      if (finalized) { restBtn.hidden = true; return; }
+      let hidden = 0;
+      for (const r of Object.values(hourRows)) {
+        const keep = showAll
+          || (parseFloat(r.hidden.value) || 0) > 0
+          || (r.missing && !clockResolved.has(r.emp.id))
+          || doorChecks[r.emp.id]?.checked;
+        r.row.hidden = !keep;
+        // the button removes itself once used, so only touch a live one
+        if (r.skipBtn?.isConnected) r.skipBtn.hidden = !keep;
+        if (!keep) hidden += 1;
+      }
+      restBtn.hidden = hidden === 0 && !showAll;
+      restBtn.textContent = showAll
+        ? "Hide staff with no hours"
+        : `+ ${hidden} more on the roster with no hours tonight`;
+    }
+    restBtn.addEventListener("click", () => { showAll = !showAll; applyHourFilter(); });
+    hourFilters.push(applyHourFilter);
+
     p.append(el("div", { class: "seclabel" }, "Kitchen — worked tonight"));
     const bohCard = el("div", { class: "card bohgrid", style: "padding:6px 8px" });
     for (const e of boh) {
@@ -620,7 +641,23 @@ async function renderDay(dateArg) {
     if (!boh.length) bohCard.append(el("div", { class: "note" }, "No BOH staff yet."));
     p.append(bohCard);
 
-    p.append(el("div", { class: "seclabel" }, "Event sales & tips · usually $0"));
+    // On one screen, a section that reads $0 on most nights is pure scroll
+    // between the manager and the Finalize button. Collapse it unless this
+    // night actually had event money or an unattached deposit waiting — then
+    // it opens itself, because a hidden deposit is money nobody pays out.
+    const evOpen = Boolean(inputs.event_food_sales_cents || inputs.event_tips_cents
+                           || (sq?.event?.deposits || []).length
+                           || sq?.event?.ticket_tips_cents);
+    const evBody = el("div", evOpen ? {} : { hidden: "" });
+    const evToggle = el("button", { class: "seclabel sectoggle", type: "button" },
+      `${evOpen ? "▾" : "▸"} Event sales & tips`,
+      el("span", { class: "hint" }, evOpen ? "" : " · nothing tonight"));
+    evToggle.addEventListener("click", () => {
+      evBody.hidden = !evBody.hidden;
+      evToggle.firstChild.textContent =
+        `${evBody.hidden ? "▸" : "▾"} Event sales & tips`;
+    });
+    p.append(evToggle, evBody);
     const evGrid = el("div", { class: "eventgrid" });
     for (const [key, label] of [["event_food_sales_cents", "Event food"],
                                 ["event_tips_cents", "Event tips"]]) {
@@ -633,8 +670,8 @@ async function renderDay(dateArg) {
         el("div", { class: "lab" }, label),
         el("div", { class: "amt" }, el("span", { class: "cur" }, "$"), input)));
     }
-    p.append(evGrid);
-    renderEventDetail(p);
+    evBody.append(evGrid);
+    renderEventDetail(evBody);
   }
 
   /* Where the event money came from, and the deposit picker.
@@ -708,7 +745,7 @@ async function renderDay(dateArg) {
   /* ===== STEP 3 — Review ===== */
   {
     const p = panes[3];
-    p.append(el("h2", { class: "stephead" }, "Review the distribution"),
+    p.append(el("div", { class: "seclabel" }, "Distribution"),
              el("p", { class: "stepsub" }, "Scan for anything obviously off before you lock it."));
     p.append(el("div", { class: "flags-slot" }), el("div", { class: "pools" }),
              el("div", { class: "seclabel" }, "FOH payouts"),
@@ -764,8 +801,7 @@ async function renderDay(dateArg) {
   {
     const p = panes[4];
     if (!finalized) {
-      p.append(el("h2", { class: "stephead" }, "Lock this day"),
-               el("p", { class: "stepsub" }, "Finalizing writes an immutable snapshot. Here's exactly what gets locked."),
+      p.append(el("div", { class: "seclabel" }, "What gets locked"),
                el("div", { class: "hero" },
                  el("div", { class: "k" }, "Payout total"),
                  el("div", { class: "v total-slot" }, ""),
@@ -871,14 +907,11 @@ async function renderDay(dateArg) {
     return cashZeroFlagged && !cashConfirmed && centsFromInput(moneyEls.cash_tips_cents) === 0;
   }
 
-  const backBtn = el("button", { class: "ghost", type: "button" }, "Back");
   const primaryBtn = el("button", { class: "primary-grow", type: "button" }, "");
-  backBtn.addEventListener("click", () => goTo(step - 1));
   primaryBtn.addEventListener("click", onPrimary);
 
   function refreshFooter() {
     if (finalized) {
-      backBtn.hidden = true;
       if (ME.role === "admin") {
         primaryBtn.className = "danger primary-grow";
         primaryBtn.textContent = "Reopen day";
@@ -890,31 +923,27 @@ async function renderDay(dateArg) {
       }
       return;
     }
-    backBtn.hidden = step === 1;
     primaryBtn.disabled = false;
     primaryBtn.className = "primary-grow";
-    if (step === 1) {
-      primaryBtn.textContent = cashGateOpen() ? "Confirm $0 cash & continue ›" : "Confirm & continue ›";
-      if (cashGateOpen()) primaryBtn.className = "warnbtn primary-grow";
-    } else if (step === 2) {
-      const open = unresolvedClockouts();
-      if (open.length) {
-        primaryBtn.textContent = "Resolve clock-out to continue";
-        primaryBtn.disabled = true;
-        primaryBtn.className = "ghost primary-grow";
-      } else {
-        primaryBtn.textContent = "Review distribution ›";
-      }
-    } else if (step === 3) {
-      primaryBtn.textContent = "Go to finalize ›";
+    // The wizard used to gate each step; with one screen the same checks gate
+    // the only irreversible action. None of them is dismissible by scrolling
+    // past it, which is what a "next" button amounted to.
+    const open = unresolvedClockouts();
+    if (blockedFields.length) {
+      primaryBtn.textContent = "Blocked — fix mappings in Setup";
+      primaryBtn.disabled = true;
+      primaryBtn.className = "ghost primary-grow";
+    } else if (open.length) {
+      primaryBtn.textContent = open.length === 1
+        ? `Resolve ${open[0].display_name}'s clock-out to finalize`
+        : `Resolve ${open.length} missing clock-outs to finalize`;
+      primaryBtn.disabled = true;
+      primaryBtn.className = "ghost primary-grow";
+    } else if (cashGateOpen()) {
+      primaryBtn.textContent = "Confirm $0 cash tips, then finalize";
+      primaryBtn.className = "warnbtn primary-grow";
     } else {
-      if (blockedFields.length) {
-        primaryBtn.textContent = "Blocked — fix mappings in Setup";
-        primaryBtn.disabled = true;
-        primaryBtn.className = "ghost primary-grow";
-      } else {
-        primaryBtn.textContent = `Finalize — lock ${fmt(payoutTotal())}`;
-      }
+      primaryBtn.textContent = `Finalize — lock ${fmt(payoutTotal())}`;
     }
   }
 
@@ -929,12 +958,15 @@ async function renderDay(dateArg) {
       }
       return;
     }
-    if (step === 1 && cashGateOpen()) {
+    // First press acknowledges the suspicious $0; the second finalizes. Two
+    // presses, not two screens — the manager still has to say "yes, really".
+    if (cashGateOpen()) {
       cashConfirmed = true;
-      goTo(2);
+      refreshAll();
       return;
     }
-    if (step < 4) { goTo(step + 1); return; }
+    if (!askFirst(`Finalize ${nice}? It writes an immutable snapshot of `
+                  + `${fmt(payoutTotal())}.`)) return;
     clearTimeout(saveTimer);
     await saveNow();
     primaryBtn.disabled = true;
@@ -948,23 +980,11 @@ async function renderDay(dateArg) {
     }
   }
 
-  function goTo(n) {
-    if (finalized || n < 1 || n > 4) return;
-    if (n > 2 && unresolvedClockouts().length) {
-      step = 2;
-      toast("Resolve the missing clock-out first", true);
-    } else {
-      step = n;
-    }
-    refreshAll();
-  }
+
 
   /* ---- global refresh: badges, panes, rail, footer, cash badge ---- */
   function refreshAll() {
     renderRail();
-    for (const [n, pane] of Object.entries(panes)) {
-      pane.style.display = Number(n) === step ? "" : "none";
-    }
     for (const card of panes[1]._cards || []) {
       const key = card._key;
       let prov = provenance(key);
@@ -1000,16 +1020,16 @@ async function renderDay(dateArg) {
         sub.textContent = sq ? "from Square timecards" : "manual entry";
       }
     }
-    if (step === 3) renderReview();
+    for (const f of hourFilters) f();
+    renderReview();
     renderLock();
     refreshFooter();
   }
 
   view.append(el("div", { class: "actionbar" },
-    el("div", {}, statusEl), backBtn, primaryBtn));
+    el("div", {}, statusEl), primaryBtn));
 
   refreshAll();
-  if (finalized) renderRail();
 }
 
 /* ---------- daily review: PERCENT_TIPOUT stepper (La Fontana, M5) ----------
@@ -1450,9 +1470,6 @@ async function renderDayLF(dateArg) {
 
   function refreshAll() {
     renderRail();
-    for (const [n, pane] of Object.entries(panes)) {
-      pane.style.display = Number(n) === step ? "" : "none";
-    }
     if (panes[1]._gratBadge && sq) {
       const prov = !("auto_gratuity_cents" in sqVal) ? "manual"
         : centsFromInput(gratEl) === sqVal.auto_gratuity_cents ? "square" : "override";
@@ -1465,7 +1482,8 @@ async function renderDayLF(dateArg) {
         ? `⚠ ${fmt(un)} still unresolved`
         : un < 0 ? "⚠ assignments exceed the bucket" : "✓ fully resolved";
     }
-    if (step === 3) renderReview();
+    for (const f of hourFilters) f();
+    renderReview();
     renderLock();
     refreshFooter();
   }
