@@ -40,3 +40,6 @@ build/
 
 # one-off design handoff bundle (contains staff first names in mockups)
 design_handoff_daily_review/
+
+# staff-facing policy handouts (venue documents, not app source)
+staff-docs/
