@@ -254,3 +254,107 @@ class TestKitchenContractLabour:
         assert a["hours"] == 6 and a["wages_cents"] == 13200   # 6 h x $22
         assert a["tips_cents"] > 0, "her kitchen share is money she is owed"
         assert a["total_cents"] == a["wages_cents"] + a["tips_cents"]
+
+
+class TestPoquitosContractLabour:
+    """Poquitos reads the role off the Square job chosen at clock-in, and a
+    contractor never clocks in — so the role is picked by hand and the shift
+    lives in its own list (owner 2026-08-30)."""
+
+    DAY = "2026-10-11"
+
+    @pytest.fixture(autouse=True)
+    def poq(self, client):
+        v = {x["slug"]: x for x in client.get("/api/venues").json()}["poquitos"]
+        self.h = {"X-Venue-Id": str(v["id"])}
+        emps = {e["display_name"]: e for e in
+                client.get("/api/employees", headers=self.h).json()}
+        for name, role, kw in (("Reg Bartender", "FOH", {}),
+                               ("Poq Cook", "BOH", {}),
+                               ("Poq Contractor", "FOH",
+                                {"is_contractor": True, "hourly_rate_cents": 2500})):
+            if name not in emps:
+                client.post("/api/employees", headers=self.h,
+                            json={"display_name": name, "pool_role": role, **kw})
+        self.emps = {e["display_name"]: e for e in
+                     client.get("/api/employees", headers=self.h).json()}
+
+    def _put(self, client, **extra):
+        body = {"credit_tips_cents": 100000,
+                "shifts": [{"employee_id": self.emps["Reg Bartender"]["id"],
+                            "role": "BARTENDER", "hours": 8},
+                           {"employee_id": self.emps["Poq Cook"]["id"],
+                            "role": "LINE_COOK", "hours": 8}]}
+        body.update(extra)
+        return client.put(f"/api/days/{self.DAY}", headers=self.h, json=body).json()
+
+    def test_a_hand_picked_role_earns_its_points(self, client):
+        out = self._put(client, contractor_shifts=[
+            {"employee_id": self.emps["Poq Contractor"]["id"],
+             "role": "SERVER", "hours": 8}])["computed"]
+        rows = {p["name"]: p for p in out["people"]}
+        assert rows["Poq Contractor"]["points"] == 8       # SERVER = 1 pt/h
+        assert rows["Reg Bartender"]["points"] == 10       # BARTENDER = 1.25
+        assert rows["Poq Contractor"]["tips_cents"] > 0
+
+    def test_the_pool_still_conserves(self, client):
+        out = self._put(client, contractor_shifts=[
+            {"employee_id": self.emps["Poq Contractor"]["id"],
+             "role": "SERVER", "hours": 8}])["computed"]
+        assert (sum(p["tips_cents"] for p in out["people"])
+                == out["totals"]["total_tips_cents"])
+
+    def test_the_pulled_shift_list_is_never_marked_an_override(self, client):
+        """The reason contractor shifts are a separate list: a hand-added
+        shift inside `shifts` would freeze the whole list against re-pulls."""
+        body = self._put(client, contractor_shifts=[
+            {"employee_id": self.emps["Poq Contractor"]["id"],
+             "role": "SERVER", "hours": 8}])
+        pulled_ids = {s["employee_id"] for s in body["inputs"]["shifts"]}
+        assert self.emps["Poq Contractor"]["id"] not in pulled_ids
+        assert body["inputs"]["contractor_shifts"]
+
+
+class TestLaFontanaContractLabour:
+    """LF pools split EVENLY among the role members who worked, so a
+    contractor's hours decide membership and pay, never share size."""
+
+    DAY = "2026-10-18"
+
+    @pytest.fixture(autouse=True)
+    def lf(self, client):
+        v = {x["slug"]: x for x in client.get("/api/venues").json()}["la-fontana"]
+        self.h = {"X-Venue-Id": str(v["id"])}
+        have = {e["display_name"] for e in
+                client.get("/api/employees", headers=self.h).json()}
+        for name, role, kw in (("Sal Server", "SERVER", {}),
+                               ("Bo Busser", "BUSSER", {}),
+                               ("LF Contractor", "BUSSER",
+                                {"is_contractor": True, "hourly_rate_cents": 2100})):
+            if name not in have:
+                client.post("/api/employees", headers=self.h,
+                            json={"display_name": name, "pool_role": role, **kw})
+        self.emps = {e["display_name"]: e for e in
+                     client.get("/api/employees", headers=self.h).json()}
+
+    def test_a_contractor_joins_their_role_pool(self, client):
+        out = client.put(f"/api/days/{self.DAY}", headers=self.h, json={
+            "server_tips": {self.emps["Sal Server"]["id"]: 100000},
+            "hours": {self.emps["Sal Server"]["id"]: 8,
+                      self.emps["Bo Busser"]["id"]: 8},
+            "contractor_hours": {self.emps["LF Contractor"]["id"]: 6},
+        }).json()["computed"]
+        rows = {p["name"]: p for p in out["people"]}
+        # even split: fewer hours does NOT mean a smaller busser share
+        assert rows["LF Contractor"]["pool_share_cents"] \
+            == rows["Bo Busser"]["pool_share_cents"]
+
+    def test_hours_stay_out_of_the_pulled_map(self, client):
+        body = client.put(f"/api/days/{self.DAY}", headers=self.h, json={
+            "server_tips": {self.emps["Sal Server"]["id"]: 100000},
+            "hours": {self.emps["Sal Server"]["id"]: 8},
+            "contractor_hours": {self.emps["LF Contractor"]["id"]: 6},
+        }).json()
+        assert str(self.emps["LF Contractor"]["id"]) not in {
+            str(k) for k in body["inputs"]["hours"]}
+        assert body["inputs"]["contractor_hours"]

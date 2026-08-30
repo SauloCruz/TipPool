@@ -160,11 +160,17 @@ class PoqDayInputsBody(BaseModel):
     event_end: str | None = None
     event_bartender_employee_id: int | None = None
     event_bartender_hours: float = Field(default=0.0, ge=0)
+    # contract labour: their own list so a hand-added shift never marks the
+    # pulled `shifts` an override and freezes it against re-pulls
+    contractor_shifts: list[PoqShiftBody] = []
     net_sales_cents: int = Field(default=0, ge=0)   # reporting only
 
 
 class LFDayInputsBody(BaseModel):
     """PERCENT_TIPOUT day inputs (La Fontana). All money integer cents."""
+    # contract labour hours — kept out of `hours` so typing them never marks
+    # the pulled map an override
+    contractor_hours: dict[int, float] = {}
     server_tips: dict[int, int] = {}
     server_cash_tips: dict[int, int] = {}
     auto_gratuity_cents: int = 0
@@ -2324,8 +2330,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for row in rows:
             outputs = snapshot_outputs(conn, row["id"]) or {}
             inputs = json.loads(row["inputs_json"])
+            # every model records contract-labour hours in its own shape:
+            # a map at Tavern Law and La Fontana, a list of shifts at
+            # Poquitos, where the role has to be picked by hand
             hours_by = {int(k): float(v)
                         for k, v in (inputs.get("contractor_hours") or {}).items()}
+            for sh in inputs.get("contractor_shifts") or ():
+                eid = int(sh["employee_id"])
+                hours_by[eid] = hours_by.get(eid, 0.0) + float(sh.get("hours") or 0)
             # every model names its payout rows differently; sum what is there
             payouts: dict[int, int] = {}
             for key in ("people", "foh", "boh"):

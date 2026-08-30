@@ -1099,6 +1099,7 @@ async function renderDayLF(dateArg) {
     api("/api/employees"),
   ]);
   const staff = employees.filter((e) => e.pool_role !== "EXCLUDED" && e.active);
+  const contractorIds = new Set(staff.filter((e) => e.is_contractor).map((e) => e.id));
   const servers = staff.filter((e) => e.pool_role === "SERVER");
   const finalized = day.status === "finalized";
   const inputs = day.inputs;
@@ -1119,6 +1120,9 @@ async function renderDayLF(dateArg) {
       server_tips: { ...(inputs.server_tips || {}) },
       server_cash_tips: { ...(inputs.server_cash_tips || {}) },
       hours: { ...(inputs.hours || {}) },
+      // contract labour keeps its own map: writing into `hours` would mark
+      // the pulled one a manager override and freeze it against re-pulls
+      contractor_hours: {},
       unattributed_assignments: { ...(inputs.unattributed_assignments || {}) },
       auto_gratuity_cents: centsFromInput(gratEl),
       unattributed_tips_cents: inputs.unattributed_tips_cents,
@@ -1136,8 +1140,10 @@ async function renderDayLF(dateArg) {
     }
     for (const [id, elm] of Object.entries(hourEls)) {
       const h = parseFloat(elm.value);
-      if (h > 0) out.hours[id] = h;
-      else delete out.hours[id];
+      const target = contractorIds.has(Number(id)) ? out.contractor_hours : out.hours;
+      if (h > 0) target[id] = h;
+      else delete target[id];
+      if (contractorIds.has(Number(id))) delete out.hours[id];
     }
     for (const [id, elm] of Object.entries(assignEls)) {
       const c = centsFromInput(elm);
@@ -1324,7 +1330,12 @@ async function renderDayLF(dateArg) {
       if (!group.length) continue;
       const card = el("div", { class: "card bohgrid", style: "padding:6px 8px" });
       for (const e of group) {
-        const pulled = Number(inputs.hours[e.id] ?? inputs.hours[String(e.id)] ?? 0);
+        // a contractor's hours never come from Square, and they are what the
+        // venue pays them directly — so they are read from, and written back
+        // to, their own map
+        const src = e.is_contractor
+          ? (inputs.contractor_hours || {}) : inputs.hours;
+        const pulled = Number(src[e.id] ?? src[String(e.id)] ?? 0);
         const state = { checked: pulled > 0, hours: pulled > 0 ? pulled : 1 };
         // collectInputs reads .value: worked -> stored hours (pulled value
         // when Square provided one, else a 1h "worked" marker)
@@ -1340,6 +1351,32 @@ async function renderDayLF(dateArg) {
           scheduleSave(); refreshAll();
         });
         card.append(chip);
+        // La Fontana does not track hours (single shift, pools split evenly),
+        // but contract labour is paid BY the hour, so the marker the chip
+        // stores would price a whole night at one hour. Give them a real
+        // field; it still does not change the size of anyone's share.
+        if (e.is_contractor) {
+          const inp = el("input", { inputmode: "decimal", type: "text",
+            value: String(state.hours), style: "width:64px;text-align:right",
+            ...(finalized ? { disabled: "" } : {}) });
+          inp.addEventListener("input", () => {
+            state.hours = Math.max(0, parseFloat(inp.value) || 0);
+            if (state.hours > 0 && !state.checked) {
+              state.checked = true;
+              chip.classList.add("on");
+              box.textContent = "✓";
+            }
+            scheduleSave();
+          });
+          inp.addEventListener("blur", () => { inp.value = String(state.hours); });
+          card.append(el("div", { class: "bohhours" },
+            el("span", { class: "rolechip contract" }, "contract"),
+            inp, el("span", { class: "unit" }, "h"),
+            el("span", { class: "hint" },
+              e.hourly_rate_cents
+                ? `${fmt(e.hourly_rate_cents)}/h — pay only, the pool splits evenly`
+                : "pay only — the pool splits evenly")));
+        }
       }
       p.append(el("div", { class: "seclabel" }, LF_ROLE_LABEL[role]), card);
     }
@@ -1570,6 +1607,10 @@ async function renderDayPoq(dateArg) {
 
   const moneyEls = {};
   let shiftRows = (inputs.shifts || []).map((s) => ({ ...s }));
+  // Contract labour: no Square account, so no timecard ever arrives and the
+  // role cannot be read off a clock-in. Kept in its own list so a hand-added
+  // shift never marks the pulled `shifts` an override.
+  let contractorRows = (inputs.contractor_shifts || []).map((s) => ({ ...s }));
   // Poquitos has no Event Bartender job, so the bartender on duty covers an
   // event on an ordinary Bartender clock-in. The pull drafts them when only
   // one bartender overlapped the event; with several the manager says which.
@@ -1588,6 +1629,9 @@ async function renderDayPoq(dateArg) {
       event_end: inputs.event_end || null,
       event_bartender_employee_id: eventBartender.id,
       event_bartender_hours: eventBartender.hours,
+      contractor_shifts: contractorRows
+        .filter((s) => s.employee_id && s.role && s.hours > 0)
+        .map((s) => ({ employee_id: s.employee_id, role: s.role, hours: s.hours })),
       shifts: shiftRows.filter((s) => s.hours > 0 || s.role)
         .map((s) => ({ employee_id: s.employee_id, role: s.role, hours: s.hours })),
     };
@@ -1746,6 +1790,71 @@ async function renderDayPoq(dateArg) {
   }
   view.append(el("div", { class: "seclabel" }, "Shifts — role from the Square clock-in"),
               shiftCard);
+
+  /* ---- contract labour ---- */
+  const contractors = employees.filter((e) => e.is_contractor && e.active);
+  if (contractors.length) {
+    const cCard = el("div", { class: "card" });
+    const cList = el("div", {});
+    const earningRoles = Object.entries(roles)
+      .filter(([, v]) => v.side !== "EXCLUDED")
+      .map(([r]) => r).sort();
+    function drawContractors() {
+      cList.textContent = "";
+      for (const [i, row] of contractorRows.entries()) {
+        const emp = byId[row.employee_id];
+        const roleSel = el("select", finalized ? { disabled: "" } : {},
+          ...earningRoles.map((r) => el("option",
+            { value: r, ...(row.role === r ? { selected: "" } : {}) },
+            r.replace(/_/g, " "))));
+        roleSel.addEventListener("change", () => {
+          row.role = roleSel.value; scheduleSave(); refreshAll();
+        });
+        const hrs = el("input", { inputmode: "decimal", type: "text",
+          value: String(row.hours ?? 0), style: "width:70px;text-align:right",
+          ...(finalized ? { disabled: "" } : {}) });
+        hrs.addEventListener("input", () => {
+          row.hours = Math.max(0, parseFloat(hrs.value) || 0); scheduleSave();
+        });
+        const del = el("button", { class: "ghost small", type: "button",
+                                   ...(finalized ? { disabled: "" } : {}) }, "✕");
+        del.addEventListener("click", () => {
+          contractorRows.splice(i, 1); drawContractors(); scheduleSave(); refreshAll();
+        });
+        const pts = parseFloat((roles[row.role] || {}).points ?? 0);
+        cList.append(el("div", { class: "hrow" },
+          el("div", { class: "who" },
+            el("div", { class: "row", style: "gap:8px" },
+              el("span", { class: "nm" }, emp ? emp.display_name : `#${row.employee_id}`),
+              el("span", { class: "rolechip contract" }, "contract")),
+            el("div", { class: "sub" },
+              `${pts} pt/h${emp?.hourly_rate_cents ? ` · paid ${fmt(emp.hourly_rate_cents)}/h directly` : ""}`)),
+          el("div", { class: "row", style: "flex:none;gap:6px" },
+            roleSel, hrs, el("span", { class: "unit" }, "h"), del)));
+      }
+      if (!contractorRows.length) {
+        cList.append(el("div", { class: "note" },
+          "Nobody on contract worked tonight."));
+      }
+    }
+    const addSel = el("select", finalized ? { disabled: "" } : {},
+      el("option", { value: "" }, "+ add a contract shift"),
+      ...contractors.map((e) => el("option", { value: String(e.id) }, e.display_name)));
+    addSel.addEventListener("change", () => {
+      if (!addSel.value) return;
+      contractorRows.push({ employee_id: Number(addSel.value),
+                            role: earningRoles[0], hours: 0 });
+      addSel.value = "";
+      drawContractors(); refreshAll();
+    });
+    drawContractors();
+    cCard.append(cList, el("div", { style: "margin-top:8px" }, addSel),
+      el("div", { class: "hint", style: "margin-top:6px" },
+        "No Square account, so no timecard — pick the role they worked and "
+        + "type the hours. They earn points exactly like a clocked-in shift; "
+        + "their hourly pay is on the Export screen."));
+    view.append(el("div", { class: "seclabel" }, "Contract labour"), cCard);
+  }
 
   /* ---- event ---- */
   const eventCard = el("div", { class: "card" });

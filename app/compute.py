@@ -70,6 +70,12 @@ EMPTY_INPUTS_LF = {
     "server_cash_tips": {},       # employee_id -> cents (declared at clock-out)
     "auto_gratuity_cents": 0,
     "hours": {},                  # employee_id -> worked hours (all roles)
+    # Contract labour hours, kept out of `hours` for the same reason as at
+    # Tavern Law: typing into the pulled map would mark it a manager override
+    # and freeze everyone's hours against the next pull. LF pools split
+    # EVENLY among the role members who worked, so these hours decide
+    # membership and pay, not the size of anyone's share.
+    "contractor_hours": {},
     "unattributed_tips_cents": 0,          # card tips with no team member
     "unattributed_assignments": {},        # employee_id -> cents, manager-assigned
     "unattributed_house_cents": 0,         # manager-marked house / no-tip
@@ -248,7 +254,8 @@ def compute_lf_outputs(inputs: dict, employees: dict[int, dict],
 
     problems = []
     referenced = (set(inputs["server_tips"]) | set(inputs["server_cash_tips"])
-                  | set(inputs["hours"]) | set(inputs["unattributed_assignments"]))
+                  | set(inputs["hours"]) | set(inputs["unattributed_assignments"])
+                  | set(inputs.get("contractor_hours") or {}))
     for eid_raw in referenced:
         eid = int(eid_raw)
         if eid not in employees:
@@ -263,6 +270,11 @@ def compute_lf_outputs(inputs: dict, employees: dict[int, dict],
     server_cash = as_int_keys(inputs["server_cash_tips"])
     assignments = as_int_keys(inputs["unattributed_assignments"])
     hours = as_int_keys(inputs["hours"])
+    # a contractor who worked is a member of their role's pool like anyone
+    # else; only the route the hours arrived by differs
+    for eid, h in as_int_keys(inputs.get("contractor_hours") or {}).items():
+        if h:
+            hours[eid] = hours.get(eid, 0) + h
 
     for eid, cents in assignments.items():
         if employees[eid]["pool_role"] != "SERVER":
@@ -380,6 +392,13 @@ EMPTY_INPUTS_POQ = {
     # their shift stays daily, so they earn from both.
     "event_bartender_employee_id": None,
     "event_bartender_hours": 0.0,
+    # Contract labour shifts. Their own list, not `shifts`, because `shifts`
+    # is what the pull writes: adding one by hand would mark the whole list a
+    # manager override and freeze it against every future re-pull. The role
+    # has to be picked by hand too — it normally comes off the Square job
+    # chosen at clock-in, and a contractor never clocks in.
+    # [{employee_id, role, hours}]
+    "contractor_shifts": [],
     # net sales (ex tax/tip/service charge) — reporting only, never paid out;
     # it is the denominator of the tip rate
     "net_sales_cents": 0,
@@ -437,7 +456,7 @@ def compute_poq_outputs(inputs: dict, employees: dict[int, dict],
 
     problems = []
     shifts = []
-    for row in inputs.get("shifts") or ():
+    for row in list(inputs.get("shifts") or ())+ list(inputs.get("contractor_shifts") or ()):
         eid = int(row["employee_id"])
         emp = employees.get(eid)
         if emp is None:
