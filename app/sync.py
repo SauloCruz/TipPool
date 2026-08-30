@@ -168,7 +168,7 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
     # what other days pulled — never re-fetched here.
     attached = attached_deposits(conn, venue["id"], business_day)
 
-    issues = food["issues"] + labor["issues"]
+    issues = food["issues"] + labor["issues"] + grat.get("issues", [])
     labor_blocked = any(i.get("severity") == "blocking" for i in labor["issues"])
     values = {
         "food_sales_cents": food["food_sales_cents"],
@@ -195,6 +195,7 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
             "food_lines": food["lines"],
             "payments": tips["payments"],
             "service_charges": grat["charges"],
+            "held_out_charges": grat.get("held_out", []),
             "timecards": labor["timecards"],
             "event_food_lines": event["event_food_lines"],
             "event_other_lines": event["other_lines"],

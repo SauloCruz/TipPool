@@ -138,6 +138,12 @@ const ISSUE_TEXT = {
   unattributed_tips: (d) =>
     `${fmt(d.cents)} in card tips have no server attached — assign them or mark house before finalizing.`,
   role_mismatch: (d) => `Role mismatch (assigned role wins): ${d.join("; ")}`,
+  job_role_mismatch: (d) =>
+    `The job clocked in under disagrees with the Staff screen: ${d.join("; ")}. The job wins for tonight — fix the Staff record if it is wrong.`,
+  unmatched_service_charge: (d) =>
+    `${fmt(d.cents)} of service charges matched nothing and were NOT pooled: ${d.names.join(", ")}. If that is staff money, add the name in Setup under auto-gratuity and pull again.`,
+  short_kitchen_shift: (d) =>
+    `Very short kitchen punch: ${d.join(", ")}. They are on tonight's roster and will take a full even share — untick them below if it was a mis-punch.`,
   pick_event_bartender: (d) =>
     `More than one bartender was on during the event (${d.join(", ")}). Pick the one who worked it under Private event — the app will not guess.`,
   event_house_charge: (d) =>
@@ -3711,7 +3717,9 @@ async function renderSettings() {
       + "Worth leaving on if you close one night at a time.")));
 
   /* --- gratuity service charge --- */
-  const gratInput = el("input", { value: s.gratuity_service_charge.name_contains || "" });
+  const gc = s.gratuity_service_charge.name_contains;
+  const gratInput = el("input", {
+    value: Array.isArray(gc) ? gc.join(", ") : (gc || "") });
   const gratSave = el("button", { class: "small" }, "Save");
   gratSave.addEventListener("click", async () => {
     try {
@@ -3724,9 +3732,9 @@ async function renderSettings() {
   view.append(el("div", { class: "card" },
     el("h2", {}, "Auto-gratuity service charge"),
     el("div", { class: "note" }, "Square catalog gratuity charges (type AUTO_GRATUITY) are detected automatically, pre-tax. The name match below additionally catches custom/ad-hoc charges."),
-    el("label", {}, "Also match service charges whose name contains"),
+    el("label", {}, "Also match service charges whose name contains (comma separated)"),
     el("div", { class: "row" }, gratInput, gratSave),
-    el("div", { class: "note" }, "Matched charges are pulled as the auto-gratuity pool (reported as wages, separate from tips).")));
+    el("div", { class: "note" }, "Matched charges are pulled as the auto-gratuity pool (reported as wages, separate from tips). List every name the venue uses \u2014 Tavern Law rings some nights as a catalog gratuity and others as a custom charge called \u201cService Charge\u201d. Anything that matches nothing is reported on the day rather than dropped.")));
 
   /* --- house service charges: the exclusion that outranks everything ---
      A charge named here is never staff money, whatever type Square gives it.

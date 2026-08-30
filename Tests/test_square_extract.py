@@ -631,3 +631,91 @@ class TestEventTips:
                  "refunded_money": money(37012)}]
         out = extract_event_tips(orders, pays, ["O2"], self.CFG)
         assert out["event_tips_cents"] == 0
+
+
+class TestServiceChargesAreNeverSilentlyDropped:
+    """A charge that matches nothing is money nobody has accounted for.
+    Tavern Law rang $59.80 on 2026-08-05 as a CUSTOM charge named "Service
+    Charge": it matched neither the AUTO_GRATUITY type nor "gratuity", so it
+    vanished from the day while the spreadsheet paid it out."""
+
+    CFG = {"catalog_object_id": None, "name_contains": "gratuity"}
+
+    def test_unmatched_charge_is_reported(self):
+        orders = [{"id": "O1", "service_charges": [
+            {"name": "Service Charge", "type": "CUSTOM",
+             "applied_money": money(5980)}]}]
+        out = extract_auto_gratuity(orders, self.CFG)
+        assert out["auto_gratuity_cents"] == 0
+        warn, = out["issues"]
+        assert warn["code"] == "unmatched_service_charge"
+        assert warn["detail"]["cents"] == 5980
+        assert warn["detail"]["names"] == ["Service Charge"]
+
+    def test_a_known_house_charge_is_not_a_warning(self):
+        orders = [{"id": "O1", "service_charges": [
+            {"name": "Administrative Fee", "type": "CUSTOM",
+             "applied_money": money(3000)}]}]
+        out = extract_auto_gratuity(orders, self.CFG,
+                                    house_names=["administrative fee"])
+        assert out["auto_gratuity_cents"] == 0 and out["issues"] == []
+
+    def test_name_match_accepts_several_names(self):
+        orders = [{"id": "O1", "service_charges": [
+            {"name": "Service Charge", "type": "CUSTOM",
+             "applied_money": money(5980)}]}]
+        cfg = {"catalog_object_id": None, "name_contains": "gratuity, service charge"}
+        out = extract_auto_gratuity(orders, cfg)
+        assert out["auto_gratuity_cents"] == 5980 and out["issues"] == []
+
+    def test_name_match_accepts_a_list(self):
+        orders = [{"id": "O1", "service_charges": [
+            {"name": "Service Charge", "type": "CUSTOM",
+             "applied_money": money(5980)}]}]
+        cfg = {"catalog_object_id": None, "name_contains": ["gratuity", "service charge"]}
+        assert extract_auto_gratuity(orders, cfg)["auto_gratuity_cents"] == 5980
+
+
+class TestHoursRoundOncePerDay:
+    """A split punch must not out-earn an unbroken shift. Jacob Ruley worked
+    17:00-22:46 then 22:46-00:36 on 2026-08-13 — exactly 7.00 tippable hours,
+    but rounding each timecard first read 5.80 + 1.25 = 7.05."""
+
+    def test_split_punch_matches_the_unbroken_shift(self):
+        split = run_extract([
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T05:46:00Z"),
+            timecard("TM_BREE", "2026-07-04T05:46:00Z", "2026-07-04T07:36:00Z"),
+        ])
+        whole = run_extract([
+            timecard("TM_KELLY", "2026-07-04T00:00:00Z", "2026-07-04T07:36:00Z"),
+        ])
+        assert split["foh_hours"]["1"] == whole["foh_hours"]["2"] == 7.0
+
+    def test_the_day_total_still_rounds_up(self):
+        # 17:00 -> 23:47 = 6.7833 h -> 6.80
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T06:47:00Z"),
+        ])
+        assert out["foh_hours"] == {"1": 6.8}
+
+
+class TestShortKitchenShift:
+    """Any kitchen timecard puts someone on the roster (owner rule), so a
+    stray one-minute punch splits the allocation one more way. Jose Medina's
+    2026-08-01 "shift" was 17:00-17:01. The roster still counts him — only a
+    manager may take someone off — but the day names the punch."""
+
+    def test_one_minute_punch_is_flagged_but_still_counted(self):
+        out = run_extract([
+            timecard("TM_BENITO", "2026-07-04T00:00:00Z", "2026-07-04T00:01:00Z"),
+        ])
+        assert out["boh_worked"] == [4]
+        warn, = [i for i in out["issues"] if i["code"] == "short_kitchen_shift"]
+        assert warn["detail"] == ["Benito (1 min)"]
+
+    def test_a_real_kitchen_shift_is_not_flagged(self):
+        out = run_extract([
+            timecard("TM_BENITO", "2026-07-03T21:00:00Z", "2026-07-04T06:00:00Z"),
+        ])
+        assert out["boh_worked"] == [4]
+        assert not [i for i in out["issues"] if i["code"] == "short_kitchen_shift"]
