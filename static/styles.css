@@ -267,6 +267,12 @@ tfoot td { font-weight: 700; border-bottom: 0; }
 .doorbtn.on {
   background: rgba(94, 176, 220, .16); border-color: #5eb0dc; color: #5eb0dc;
 }
+/* the same mark, but read off the Square job rather than chosen here — a
+   read-out, so it must not look like something you can press */
+.doorbtn.auto {
+  display: inline-flex; align-items: center; background: rgba(94, 176, 220, .10);
+  border-style: dashed; border-color: #5eb0dc; color: #5eb0dc; cursor: default;
+}
 
 /* step-2 kitchen chips */
 .bohgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 6px 8px; }
@@ -608,3 +614,38 @@ td.tot, th.tot { font-weight: 700; }
 /* payroll rows with no timecards: present for line-by-line reading, but
    visibly carrying no figures of their own */
 .sheet tr.quiet td { color: #6a6f78; }
+
+
+/* ---- step-2 event deposits (Tavern Law) --------------------------------
+   A deposit is the party's gratuity, rung days or weeks before the night.
+   Nothing here is guessed: the manager attaches one. */
+.deplist { display: grid; gap: 6px; padding: 8px; }
+.deprow {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+  min-height: 44px; border: 1px solid var(--line); border-radius: 10px;
+  background: #0f1115; color: var(--text); text-align: left; width: 100%;
+}
+.deprow .box {
+  flex: none; width: 20px; height: 20px; border: 1px solid var(--line);
+  border-radius: 6px; display: grid; place-items: center; font-size: .8rem;
+}
+.deprow.on { border-color: #5eb0dc; background: rgba(94, 176, 220, .12); }
+.deprow.on .box { border-color: #5eb0dc; color: #5eb0dc; }
+.deprow.taken { opacity: .55; cursor: not-allowed; }
+.deprow .dep-when { flex: none; font-variant-numeric: tabular-nums; color: var(--muted); }
+.deprow .dep-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.deprow .dep-amt { flex: none; font-variant-numeric: tabular-nums; font-weight: 600; }
+.deprow .sugg {
+  flex: none; font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: #5eb0dc;
+}
+/* money the house keeps out of every pool — always shown, never silently
+   dropped, because vanishing money hides as badly as misdirected money */
+.heldout { display: grid; gap: 3px; }
+.heldout .hrowline { display: flex; justify-content: space-between; gap: 12px; }
+
+/* Setup: job -> pool role mapping (Tavern Law). One row per Square job. */
+.maprows { display: grid; gap: 2px; }
+.maprows .row { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.maprows .row:last-child { border-bottom: 0; }

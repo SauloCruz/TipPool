@@ -10,12 +10,17 @@ from __future__ import annotations
 import json
 import sqlite3
 from decimal import Decimal
+from fractions import Fraction
 
 from engine import TippableWindow
 
 from .db import audit, utcnow
 
-CATEGORY_GROUPS = ("FOOD", "ALCOHOL", "NA_BEV", "RETAIL", "OTHER")
+# EVENT is private-event money (deposits, food packages, beverage packages,
+# room fees). It is deliberately NOT part of FOOD: the venue's own food-sales
+# figure excludes every event line, and the event lines are read separately
+# into the day's event food and event tips (owner 2026-08-29).
+CATEGORY_GROUPS = ("FOOD", "ALCOHOL", "NA_BEV", "RETAIL", "EVENT", "OTHER")
 
 DEFAULTS = {
     # square_category_id -> {"name": str, "group": one of CATEGORY_GROUPS or None}
@@ -60,6 +65,34 @@ DEFAULTS = {
     # a fixed per-person role). Owner ruling 2026-07-29: half credit, applied
     # to the tip pool AND the auto-gratuity pool. "1" disables the reduction.
     "tl_door_weight": "0.5",
+    # Square job title (verbatim) -> pool role, read off each timecard's
+    # `wage.title`. Staff hold two jobs — a bartender who also manages, a
+    # server who also hosts — so the shift decides, not the person (owner
+    # 2026-08-29, same mechanism as Poquitos). DOOR is FOH at
+    # `tl_door_weight`. A title seen on a timecard but missing here BLOCKS
+    # the day: never guess what a shift is worth. Square marks Host, Kitchen
+    # Staff and even Owner `is_tip_eligible` — that flag is meaningless here
+    # and is never seeded from.
+    "tl_job_roles": {
+        "Bartender": "FOH",
+        "Server": "FOH",
+        "Host": "DOOR",
+        "Kitchen Staff": "BOH",
+        "Bar Manager": "EXCLUDED",
+        "Manager": "EXCLUDED",
+        "Bussines Accountant": "EXCLUDED",
+        "Owner": "EXCLUDED",
+    },
+    # Within the EVENT category, which line items are which. Matched as a
+    # case-insensitive substring of the item name. Everything else in the
+    # category (beverage packages, room fees, event taxes) is event money the
+    # pool never sees: out of food sales, reported on the day, paid to nobody.
+    "tl_event_items": {"food_contains": "food", "deposit_contains": "deposit"},
+    # How far back the day screen looks for an unattached event deposit. A
+    # deposit is rung days or weeks ahead of its event (8/15 for 8/22) and
+    # only some carry a note naming the date, so the manager attaches one by
+    # hand from this list — nothing is parsed and nothing is guessed.
+    "tl_deposit_lookback_days": 90,
     # ---- POINTS_HOURS (Poquitos, M6) ----
     # Role catalogue: points per hour and which pool the role feeds.
     # side FOH/BOH share the daily split; EVENT is event-pool only (and out
@@ -203,6 +236,17 @@ def windows_by_weekday(settings: dict) -> dict[int, TippableWindow]:
 
 def rounding_increment(settings: dict) -> Decimal:
     return Decimal(settings["rounding_increment"])
+
+
+# ---- POOL_HOURS (Tavern Law) helpers ----
+
+def tl_job_roles(settings: dict) -> dict[str, str]:
+    """Square job title (verbatim) -> FOH | DOOR | BOH | EXCLUDED."""
+    return dict(settings["tl_job_roles"])
+
+
+def tl_door_weight(settings: dict) -> Fraction:
+    return Fraction(str(settings["tl_door_weight"]))
 
 
 # ---- POINTS_HOURS (Poquitos) helpers: settings -> engine shapes ----

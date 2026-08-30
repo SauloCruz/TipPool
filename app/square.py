@@ -95,15 +95,24 @@ class SquareClient:
         return out
 
     def search_orders(self, begin_iso: str, end_iso: str) -> list[dict]:
+        """Orders OPENED in the window.
+
+        Deliberately `created_at`, not `closed_at`: a ticket belongs to the
+        night it was rung, and venues do not settle tabs on the night. Tavern
+        Law closes its tabs in a batch the following afternoon, which put
+        $525 of 8/18's food sales onto 8/19 while we filtered on `closed_at`;
+        `created_at` reproduces the venue's own Sales-by-Category report
+        exactly. La Fontana does the same on roughly a quarter of its tickets.
+        """
         return self._paged_post("/v2/orders/search", {
             "location_ids": self.location_ids,
             "query": {
                 "filter": {
                     "state_filter": {"states": ["COMPLETED"]},
-                    "date_time_filter": {"closed_at": {
+                    "date_time_filter": {"created_at": {
                         "start_at": begin_iso, "end_at": end_iso}},
                 },
-                "sort": {"sort_field": "CLOSED_AT"},
+                "sort": {"sort_field": "CREATED_AT"},
             },
             "limit": 100,
         }, "orders")

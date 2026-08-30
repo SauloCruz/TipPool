@@ -12,6 +12,7 @@ and is left alone."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -29,7 +30,9 @@ from .square_extract import (
     extract_auto_gratuity,
     _iso,
     extract_credit_tips,
+    extract_event_items,
     extract_event_money,
+    extract_event_tips,
     extract_food_sales,
     extract_lf_timecards,
     extract_server_tips,
@@ -37,7 +40,9 @@ from .square_extract import (
 )
 
 SQUARE_FIELDS = ("food_sales_cents", "credit_tips_cents", "auto_gratuity_cents",
-                 "cash_tips_cents", "boh_worked", "foh_hours")
+                 "cash_tips_cents", "boh_worked", "foh_hours",
+                 "foh_role_weights", "event_food_sales_cents",
+                 "event_tips_cents")
 LF_SQUARE_FIELDS = ("server_tips", "server_cash_tips", "auto_gratuity_cents",
                     "hours", "unattributed_tips_cents")
 POQ_SQUARE_FIELDS = ("credit_tips_cents", "cash_tips_cents",
@@ -59,6 +64,19 @@ def blocked_fields(square: dict | None) -> set[str]:
     return out
 
 
+# Fields the pull derives and the manager never edits directly. They carry no
+# override protection — a re-pull always replaces them — and they are not
+# audited as overrides, because nobody chose them.
+DERIVED_FIELDS = frozenset({"foh_role_weights"})
+
+# Money a manager may have typed before Square could see it. On the FIRST pull
+# a non-zero manual figure is kept rather than overwritten: event tips in
+# particular arrive as a deposit rung weeks earlier, and a pull that silently
+# zeroed a hand-entered event would take real money off real people. Once a
+# pull has run, the ordinary override rule takes over.
+STICKY_IF_MANUAL = frozenset({"event_food_sales_cents", "event_tips_cents"})
+
+
 def merge_pull_into_inputs(old_inputs: dict, old_square: dict | None,
                            new_square: dict,
                            fields: tuple = SQUARE_FIELDS) -> dict:
@@ -70,8 +88,14 @@ def merge_pull_into_inputs(old_inputs: dict, old_square: dict | None,
     for field in fields:
         if field in blocked or field not in new_square["values"]:
             continue
+        if field in DERIVED_FIELDS:
+            inputs[field] = new_square["values"][field]
+            continue
         if field in old_values and inputs.get(field) != old_values[field]:
             continue  # manager override — keep it
+        if (field not in old_values and field in STICKY_IF_MANUAL
+                and inputs.get(field)):
+            continue  # typed by hand before Square could see it
         inputs[field] = new_square["values"][field]
     return inputs
 
@@ -119,26 +143,47 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
     )
 
     food = extract_food_sales(orders, catalog_lookup, settings["category_map"])
-    tips = extract_credit_tips(payments)
-    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"], payments)
+    event = extract_event_items(orders, catalog_lookup, settings["category_map"],
+                                settings["tl_event_items"])
+    # An event ticket's own tips and gratuity belong to the event, not to the
+    # night's floor (owner 2026-08-29) — so they come out of the daily pools.
+    ev_ids = event["order_ids"]
+    ev_tips = extract_event_tips(orders, payments, ev_ids,
+                                 settings["gratuity_service_charge"],
+                                 settings["house_service_charges"])
+    tips = extract_credit_tips(payments, exclude_order_ids=ev_ids)
+    grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"],
+                                 payments, exclude_order_ids=ev_ids,
+                                 house_names=settings["house_service_charges"])
     labor = extract_timecards(
         timecards, emp_by_tmid, business_day,
         settings_store.windows_by_weekday(settings), venue["timezone"],
         settings_store.rounding_increment(settings),
+        job_roles=settings_store.tl_job_roles(settings),
+        door_weight=settings_store.tl_door_weight(settings),
     )
 
+    # Deposits the manager has already attached to this day. They are the
+    # party's gratuity, rung days earlier, so they can only be resolved from
+    # what other days pulled — never re-fetched here.
+    attached = attached_deposits(conn, venue["id"], business_day)
+
     issues = food["issues"] + labor["issues"]
-    labor_blocked = any(i["code"] == "unmapped_team_member" for i in labor["issues"])
+    labor_blocked = any(i.get("severity") == "blocking" for i in labor["issues"])
     values = {
         "food_sales_cents": food["food_sales_cents"],
         "credit_tips_cents": tips["credit_tips_cents"],
         "auto_gratuity_cents": grat["auto_gratuity_cents"],
+        "event_food_sales_cents": event["event_food_cents"],
+        "event_tips_cents": ev_tips["event_tips_cents"]
+                            + sum(d["gross_cents"] for d in attached),
     }
     if not labor_blocked:
         values.update({
             "cash_tips_cents": labor["cash_tips_cents"],
             "boh_worked": labor["boh_worked"],
             "foh_hours": labor["foh_hours"],
+            "foh_role_weights": labor["foh_role_weights"],
         })
 
     return {
@@ -151,10 +196,62 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
             "payments": tips["payments"],
             "service_charges": grat["charges"],
             "timecards": labor["timecards"],
+            "event_food_lines": event["event_food_lines"],
+            "event_other_lines": event["other_lines"],
+            "event_other_cents": event["other_cents"],
+            "event_ticket_tips": ev_tips["lines"],
+            "event_ticket_tips_cents": ev_tips["event_tips_cents"],
+            "event_deposits_found": event["deposits"],
+            "event_deposits_attached": attached,
             "counts": {"payments": len(payments), "orders": len(orders),
                        "timecards": len(timecards)},
         },
     }
+
+
+def deposit_ledger(conn: sqlite3.Connection, venue_id: int,
+                   since: date) -> list[dict]:
+    """Every event deposit this venue has pulled since `since`, each marked
+    with the day it is attached to (or None).
+
+    Deposits are discovered by the ordinary daily pull and read back from
+    storage rather than re-fetched: a 90-day Orders search would be ~90 API
+    pages, far too slow for a screen, and every day that matters has been
+    pulled anyway. A day never pulled simply contributes nothing — its
+    deposits are not invented.
+    """
+    rows = conn.execute(
+        "SELECT date, inputs_json, square_json FROM day"
+        " WHERE venue_id = ? AND date >= ? ORDER BY date",
+        (venue_id, since.isoformat()),
+    ).fetchall()
+    found: dict[str, dict] = {}
+    claimed: dict[str, str] = {}
+    for r in rows:
+        for did in (json.loads(r["inputs_json"]).get("event_deposit_ids") or []):
+            claimed[did] = r["date"]
+        if not r["square_json"]:
+            continue
+        for d in (json.loads(r["square_json"]).get("raw", {})
+                  .get("event_deposits_found") or []):
+            found.setdefault(d["deposit_id"], {**d, "rung_on": r["date"]})
+    return [{**d, "attached_to": claimed.get(did)}
+            for did, d in sorted(found.items(), key=lambda kv: kv[1]["rung_on"])]
+
+
+def attached_deposits(conn: sqlite3.Connection, venue_id: int,
+                      business_day: date) -> list[dict]:
+    """The deposits attached to one day, resolved to amounts."""
+    row = conn.execute(
+        "SELECT inputs_json FROM day WHERE venue_id = ? AND date = ?",
+        (venue_id, business_day.isoformat()),
+    ).fetchone()
+    wanted = set((json.loads(row["inputs_json"]).get("event_deposit_ids") or [])
+                 if row else ())
+    if not wanted:
+        return []
+    ledger = deposit_ledger(conn, venue_id, business_day - timedelta(days=400))
+    return [d for d in ledger if d["deposit_id"] in wanted]
 
 
 def _pull_values_lf(payments, orders, timecards, emp_by_tmid,

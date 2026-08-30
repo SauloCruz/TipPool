@@ -109,3 +109,24 @@ class TestConfigParsing:
         s = Settings(env_file="/nonexistent")
         assert s.square_location_ids == []
         assert not s.square_configured
+
+
+class TestOrdersUseCreatedAt:
+    """A ticket belongs to the night it was rung, not the day someone got
+    round to closing it. Tavern Law closes its tabs in a batch the following
+    afternoon: filtering on `closed_at` put $525 of 8/18's food sales onto
+    8/19 (owner 2026-08-29)."""
+
+    def test_search_orders_filters_and_sorts_on_created_at(self):
+        seen = {}
+
+        def handler(request):
+            seen["body"] = json.loads(request.content)
+            return httpx.Response(200, json={"orders": []})
+
+        client = make_client(handler, locations=("L1",))
+        client.search_orders("2026-08-18T02:00:00-07:00", "2026-08-19T02:00:00-07:00")
+        f = seen["body"]["query"]["filter"]["date_time_filter"]
+        assert "created_at" in f and "closed_at" not in f
+        assert f["created_at"]["start_at"] == "2026-08-18T02:00:00-07:00"
+        assert seen["body"]["query"]["sort"]["sort_field"] == "CREATED_AT"
