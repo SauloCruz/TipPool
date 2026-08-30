@@ -1073,7 +1073,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             out["shifts"] = [
                 {k: sh.get(k) for k in
                  ("name", "job_title", "role", "raw_hours", "tippable_hours",
-                  "credited_hours", "missing_clockout", "invalid_interval")}
+                  "credited_hours", "minutes", "missing_clockout",
+                  "invalid_interval")}
                 for sh in raw["timecards"]
             ]
         if any(k in raw for k in ("event_food_lines", "event_other_lines",
