@@ -152,13 +152,16 @@ def seed_square(fake):
     fake.timecards = [
         # Bree 3 PM - 12:40 AM (7.0 tippable), declared $25
         {"team_member_id": "TM_BREE", "start_at": "2026-07-03T22:00:00Z",
-         "end_at": "2026-07-04T07:40:00Z", "declared_cash_tip_money": money(2500)},
+         "end_at": "2026-07-04T07:40:00Z", "declared_cash_tip_money": money(2500),
+         "wage": {"title": "Bartender"}},
         # Kelly 5 PM - 10 PM (5.0), declared $34
         {"team_member_id": "TM_KELLY", "start_at": "2026-07-04T00:00:00Z",
-         "end_at": "2026-07-04T05:00:00Z", "declared_cash_tip_money": money(3400)},
+         "end_at": "2026-07-04T05:00:00Z", "declared_cash_tip_money": money(3400),
+         "wage": {"title": "Bartender"}},
         # Benito kitchen 11 AM - 9 PM
         {"team_member_id": "TM_BENITO", "start_at": "2026-07-03T18:00:00Z",
-         "end_at": "2026-07-04T04:00:00Z", "declared_cash_tip_money": money(0)},
+         "end_at": "2026-07-04T04:00:00Z", "declared_cash_tip_money": money(0),
+         "wage": {"title": "Kitchen Staff"}},
     ]
 
 
@@ -236,7 +239,11 @@ class TestPullFlow:
         assert client.post(f"/api/days/{DAY}/finalize").status_code == 200
         assert client.post(f"/api/days/{DAY}/pull").status_code == 409
 
-    def test_manual_events_untouched_by_pull(self, client, fake, roster):
+    def test_hand_typed_event_money_survives_the_first_pull(self, client, fake, roster):
+        """Event money is pulled now, but a figure the manager typed before
+        Square could see it is not silently zeroed on the first pull — an
+        event's tips arrive as a deposit rung weeks earlier, and wiping one
+        would take real money off real people."""
         d2 = "2026-07-02"
         client.put(f"/api/days/{d2}", json={"event_food_sales_cents": 50000,
                                             "event_tips_cents": 20000})
@@ -292,7 +299,8 @@ class TestMappingEndpoints:
         old_timecards = fake.timecards
         fake.timecards = [
             {"team_member_id": "TM_BREE", "start_at": "2026-07-10T22:00:00Z",
-             "end_at": "2026-07-11T07:40:00Z", "declared_cash_tip_money": money(0)},
+             "end_at": "2026-07-11T07:40:00Z", "declared_cash_tip_money": money(0),
+             "wage": {"title": "Bartender"}},
         ]
         try:
             body = client.post(f"/api/days/{d3}/pull").json()
@@ -510,6 +518,7 @@ class TestPullFailureIsActionable:
             "start_at": "2026-07-04T08:28:00Z",
             "end_at": "2026-07-04T08:28:00Z",          # same minute — no duration
             "declared_cash_tip_money": money(0),
+            "wage": {"title": "Bartender"},
         }]
         r = client.post(f"/api/days/{self.OTHER_DAY}/pull")
         assert r.status_code == 200, r.text
@@ -530,3 +539,169 @@ class TestPullFailureIsActionable:
         assert "kaboom from Square payload" in detail   # the actual reason
         assert self.OTHER_DAY in detail                 # which day to look at
         assert "not changed" in detail                  # nothing was written
+
+
+class TestEventPullTavernLaw:
+    """Private-event money is read out of Square rather than typed (owner
+    2026-08-29). The deposit is the one part a human must place: it is rung
+    days or weeks before the night, so it can never appear in the event day's
+    own pull."""
+
+    EV_DAY = "2026-07-17"
+    DEP_DAY = "2026-07-10"
+
+    def _seed_event_catalog(self, fake):
+        seed_square(fake)
+        fake.catalog_batch = {
+            "objects": [
+                {"id": "VAR_BURGER", "type": "ITEM_VARIATION",
+                 "item_variation_data": {"item_id": "ITEM_BURGER"}},
+                {"id": "VAR_EVFOOD", "type": "ITEM_VARIATION",
+                 "item_variation_data": {"item_id": "ITEM_EVFOOD"}},
+                {"id": "VAR_EVBEV", "type": "ITEM_VARIATION",
+                 "item_variation_data": {"item_id": "ITEM_EVBEV"}},
+                {"id": "VAR_EVDEP", "type": "ITEM_VARIATION",
+                 "item_variation_data": {"item_id": "ITEM_EVDEP"}},
+            ],
+            "related_objects": [
+                {"id": "ITEM_BURGER", "type": "ITEM",
+                 "item_data": {"name": "Burger",
+                               "reporting_category": {"id": "CAT_FOOD"}}},
+                {"id": "ITEM_EVFOOD", "type": "ITEM",
+                 "item_data": {"name": "Event Food Packages",
+                               "reporting_category": {"id": "CAT_EVENT"}}},
+                {"id": "ITEM_EVBEV", "type": "ITEM",
+                 "item_data": {"name": "Event Beverage Package",
+                               "reporting_category": {"id": "CAT_EVENT"}}},
+                {"id": "ITEM_EVDEP", "type": "ITEM",
+                 "item_data": {"name": "Event Deposit",
+                               "reporting_category": {"id": "CAT_EVENT"}}},
+                {"id": "CAT_FOOD", "type": "CATEGORY",
+                 "category_data": {"name": "Kitchen"}},
+                {"id": "CAT_EVENT", "type": "CATEGORY",
+                 "category_data": {"name": "Events & Catering"}},
+            ],
+        }
+
+    def _map(self, client):
+        client.put("/api/settings", json={"category_map": {
+            "CAT_FOOD": {"name": "Kitchen", "group": "FOOD"},
+            "CAT_EVENT": {"name": "Events & Catering", "group": "EVENT"},
+            "CAT_BEER": {"name": "Beer", "group": "ALCOHOL"}}})
+
+    def _pull_deposit_day(self, client, fake):
+        fake.orders = [{
+            "id": "ODEP", "created_at": "2026-07-11T04:27:36Z",
+            "tenders": [{"id": "3p1baGg6Avl", "note": "O'Brien Deposit for 7/17"}],
+            "line_items": [{"uid": "d1", "catalog_object_id": "VAR_EVDEP",
+                            "gross_sales_money": money(56924),
+                            "note": "O'Brien Deposit for 7/17"}],
+        }]
+        fake.payments, fake.timecards = [], []
+        return client.post(f"/api/days/{self.DEP_DAY}/pull")
+
+    def _pull_event_day(self, client, fake):
+        fake.orders = [
+            # the party's own tickets: food package, beverage package, and a
+            # gratuity that belongs to the crew who worked the party
+            {"id": "OEV", "created_at": "2026-07-18T02:00:00Z",
+             "line_items": [
+                 {"uid": "e1", "catalog_object_id": "VAR_EVFOOD",
+                  "gross_sales_money": money(44000)},
+                 {"uid": "e2", "catalog_object_id": "VAR_EVBEV",
+                  "gross_sales_money": money(157500)}]},
+            {"id": "OEV2", "created_at": "2026-07-18T02:10:00Z",
+             "line_items": [{"uid": "e3", "catalog_object_id": "VAR_EVFOOD",
+                             "gross_sales_money": money(7500)}],
+             "service_charges": [{"type": "AUTO_GRATUITY",
+                                  "applied_money": money(5580)}]},
+            # ordinary trade the same night
+            {"id": "OBAR", "created_at": "2026-07-18T03:00:00Z",
+             "line_items": [{"uid": "b1", "catalog_object_id": "VAR_BURGER",
+                             "gross_sales_money": money(9000)}],
+             "service_charges": [{"type": "AUTO_GRATUITY",
+                                  "applied_money": money(2660)}]},
+        ]
+        fake.payments = [
+            {"id": "PB", "order_id": "OBAR", "status": "COMPLETED",
+             "card_details": {}, "tip_money": money(4000),
+             "total_money": money(15660)},
+            {"id": "PE", "order_id": "OEV2", "status": "COMPLETED",
+             "card_details": {}, "tip_money": money(0),
+             "total_money": money(13080)},
+        ]
+        fake.timecards = []
+        return client.post(f"/api/days/{self.EV_DAY}/pull")
+
+    def test_event_lines_split_out_of_food_and_tips(self, client, fake, roster):
+        self._seed_event_catalog(fake)
+        self._map(client)
+        body = self._pull_event_day(client, fake).json()
+        inp = body["inputs"]
+        assert inp["food_sales_cents"] == 9000            # the burger only
+        assert inp["event_food_sales_cents"] == 51500     # 440 + 75, both lines
+        assert inp["event_tips_cents"] == 5580            # the event's gratuity
+        assert inp["auto_gratuity_cents"] == 2660         # the bar's, not the party's
+        assert inp["credit_tips_cents"] == 4000           # event ticket excluded
+        ev = body["square"]["event"]
+        assert ev["other_cents"] == 157500                # beverage package
+        assert ev["other_lines"][0]["item"] == "Event Beverage Package"
+
+    def test_deposit_is_offered_then_attached(self, client, fake, roster):
+        self._seed_event_catalog(fake)
+        self._map(client)
+        self._pull_deposit_day(client, fake)
+        self._pull_event_day(client, fake)
+
+        listing = client.get(f"/api/days/{self.EV_DAY}/event-deposits").json()
+        dep, = listing["deposits"]
+        assert dep["deposit_id"] == "ODEP:d1"
+        assert dep["gross_cents"] == 56924
+        assert dep["rung_on"] == self.DEP_DAY
+        assert dep["attached_to"] is None
+        assert dep["suggested"] is True            # its note names 7/17
+
+        r = client.put(f"/api/days/{self.EV_DAY}/event-deposits",
+                       json={"deposit_ids": ["ODEP:d1"]})
+        assert r.status_code == 200, r.text
+        # ticket gratuity + the deposit, and nothing typed by hand
+        assert r.json()["inputs"]["event_tips_cents"] == 5580 + 56924
+        assert r.json()["inputs"]["event_deposit_ids"] == ["ODEP:d1"]
+
+    def test_a_deposit_cannot_be_paid_to_two_events(self, client, fake, roster):
+        self._seed_event_catalog(fake)
+        self._map(client)
+        self._pull_deposit_day(client, fake)
+        self._pull_event_day(client, fake)
+        client.put(f"/api/days/{self.EV_DAY}/event-deposits",
+                   json={"deposit_ids": ["ODEP:d1"]})
+        other = "2026-07-19"
+        self._pull_event_day(client, fake)   # same fixture, different day
+        client.post(f"/api/days/{other}/pull")
+        r = client.put(f"/api/days/{other}/event-deposits",
+                       json={"deposit_ids": ["ODEP:d1"]})
+        assert r.status_code == 409
+        assert self.EV_DAY in r.json()["detail"]
+
+    def test_detaching_gives_the_money_back(self, client, fake, roster):
+        self._seed_event_catalog(fake)
+        self._map(client)
+        self._pull_deposit_day(client, fake)
+        self._pull_event_day(client, fake)
+        client.put(f"/api/days/{self.EV_DAY}/event-deposits",
+                   json={"deposit_ids": ["ODEP:d1"]})
+        r = client.put(f"/api/days/{self.EV_DAY}/event-deposits",
+                       json={"deposit_ids": []})
+        assert r.json()["inputs"]["event_tips_cents"] == 5580
+        listing = client.get(f"/api/days/{self.EV_DAY}/event-deposits").json()
+        assert listing["deposits"][0]["attached_to"] is None
+
+    def test_repull_keeps_the_attached_deposit(self, client, fake, roster):
+        self._seed_event_catalog(fake)
+        self._map(client)
+        self._pull_deposit_day(client, fake)
+        self._pull_event_day(client, fake)
+        client.put(f"/api/days/{self.EV_DAY}/event-deposits",
+                   json={"deposit_ids": ["ODEP:d1"]})
+        body = self._pull_event_day(client, fake).json()
+        assert body["inputs"]["event_tips_cents"] == 5580 + 56924

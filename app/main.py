@@ -70,6 +70,32 @@ class DayInputsBody(BaseModel):
     # staff working the host/door that night — half tip credit per hour
     # (tl_door_weight). Per-day, not a fixed role: staff work dual roles.
     door_worked: list[int] = []
+    # Derived by the pull from each shift's Square job, not manager-edited:
+    # employee_id -> exact weight string ("1/2" for a door-only night, "5/6"
+    # for five floor hours and one on the door). Round-tripped so a snapshot
+    # explains its own numbers; a re-pull always replaces it.
+    foh_role_weights: dict[int, str] = {}
+    # event deposits attached to this day, "<order_id>:<line_uid>"
+    event_deposit_ids: list[str] = []
+
+    @field_validator("foh_role_weights")
+    @classmethod
+    def _weights_sane(cls, v):
+        for eid, w in v.items():
+            try:
+                f = Fraction(str(w))
+            except (ValueError, ZeroDivisionError) as exc:
+                raise ValueError(f"bad tip-credit weight for employee {eid}") from exc
+            if not 0 <= f <= 1:
+                raise ValueError(f"tip-credit weight for employee {eid} must be 0-1")
+        return v
+
+    @field_validator("event_deposit_ids")
+    @classmethod
+    def _no_deposit_dupes(cls, v):
+        if len(set(v)) != len(v):
+            raise ValueError("the same deposit is attached twice")
+        return v
 
     @field_validator("foh_hours")
     @classmethod
@@ -92,6 +118,11 @@ class DayInputsBody(BaseModel):
         if len(set(v)) != len(v):
             raise ValueError("duplicate employee in door roster")
         return v
+
+
+class EventDepositsBody(BaseModel):
+    """Deposit ids ("<order_id>:<line_uid>") attached to one event day."""
+    deposit_ids: list[str] = []
 
 
 class PoqShiftBody(BaseModel):
@@ -188,6 +219,11 @@ class SettingsPatch(BaseModel):
     lf_no_host_min_bussers: int | None = Field(default=None, ge=0, le=20)
     # POOL_HOURS: tip credit per hour for a host/door shift ("0.5" = half, "1" = off)
     tl_door_weight: str | None = None
+    # POOL_HOURS: Square job title -> FOH | DOOR | BOH | EXCLUDED. The SHIFT
+    # decides the pool role, because staff hold two jobs (owner 2026-08-29).
+    tl_job_roles: dict[str, str] | None = None
+    tl_event_items: dict | None = None
+    tl_deposit_lookback_days: int | None = Field(default=None, ge=1, le=730)
     # POINTS_HOURS: card processing fee withheld from credit tips before pooling
     poq_card_fee_pct: str | None = None
     poq_foh_pct: str | None = None
@@ -199,6 +235,20 @@ class SettingsPatch(BaseModel):
     # settings so the period report reconciles; never enters a tip payout
     poq_workweek_start: str | None = None
     poq_overtime_after: str | None = None
+
+    @field_validator("tl_job_roles")
+    @classmethod
+    def _job_roles_valid(cls, v):
+        if v is None:
+            return v
+        allowed = {"FOH", "DOOR", "BOH", "EXCLUDED"}
+        for title, role in v.items():
+            if not str(title).strip():
+                raise ValueError("a job title cannot be blank")
+            if role not in allowed:
+                raise ValueError(
+                    f"{title!r}: role must be one of {sorted(allowed)}")
+        return dict(v)
 
     @field_validator("poq_workweek_start")
     @classmethod
@@ -933,13 +983,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # manager's hours, so the totals disagree and there is no way to see
         # why from the outside. This is the one slice of `raw` the day screen
         # gets: enough to name the declarers, not the whole extract.
+        raw = sq.get("raw") or {}
         declarations = [
             {"name": sh["name"], "job_title": sh.get("job_title"),
              "role": sh.get("role"), "cents": sh["declared_cents"]}
-            for sh in (sq.get("raw") or {}).get("shifts", [])
+            # POINTS_HOURS stores them as "shifts", POOL_HOURS as "timecards"
+            for sh in (raw.get("shifts") or raw.get("timecards") or [])
             if sh.get("declared_cents")
         ]
-        return {
+        out = {
             "pulled_at": sq["pulled_at"],
             "values": sq["values"],
             "issues": issues,
@@ -948,6 +1000,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "cash_declarations": sorted(
                 declarations, key=lambda d: (-d["cents"], d["name"])),
         }
+        # Tavern Law: what the shifts were, and where the event money came
+        # from. Money held out of every pool (beverage packages, room fees)
+        # is always shown — dropping it silently hides it just as badly as
+        # pooling it would.
+        if raw.get("timecards") is not None:
+            out["shifts"] = [
+                {k: sh.get(k) for k in
+                 ("name", "job_title", "role", "raw_hours", "tippable_hours",
+                  "credited_hours", "missing_clockout", "invalid_interval")}
+                for sh in raw["timecards"]
+            ]
+        if any(k in raw for k in ("event_food_lines", "event_other_lines",
+                                  "event_deposits_attached")):
+            out["event"] = {
+                "food_lines": raw.get("event_food_lines") or [],
+                "other_lines": raw.get("event_other_lines") or [],
+                "other_cents": raw.get("event_other_cents") or 0,
+                "ticket_tips_cents": raw.get("event_ticket_tips_cents") or 0,
+                "deposits": raw.get("event_deposits_attached") or [],
+            }
+        return out
 
     def acked_flags(row) -> list[str]:
         """Flags a manager has looked at and accepted for this day.
@@ -1053,6 +1126,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if sq:
             old_inputs = json.loads(row["inputs_json"])
             for field in sync.SQUARE_FIELDS_BY_MODEL[venue["tip_model"]]:
+                if field in sync.DERIVED_FIELDS:
+                    continue  # machine-derived, never a manager decision
                 if field not in sq["values"] or inputs.get(field) == old_inputs.get(field):
                     continue
                 if inputs.get(field) != sq["values"][field]:
@@ -1076,6 +1151,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 (json.dumps(inputs), now, user["id"], row["id"]),
             )
         audit(conn, venue["id"], user["id"], "day_inputs_saved", "day", d.isoformat())
+        conn.commit()
+        return day_payload(conn, venue, d)
+
+    @app.get("/api/days/{date_str}/event-deposits")
+    def list_event_deposits(date_str: str, user: User, conn: DB, venue: Venue):
+        """Event deposits this venue has rung, and which day each is attached
+        to.
+
+        A deposit is the party's gratuity and is rung days or weeks before the
+        night itself — 8/15 for the 8/22 event — so it can never be found by
+        pulling the event's own day. Only some carry a note naming the date,
+        so nothing here is parsed or guessed: the manager picks. `suggested`
+        merely floats a deposit whose note mentions this day's date to the top
+        of the list.
+        """
+        if venue["tip_model"] != "POOL_HOURS":
+            raise HTTPException(422, "event deposits are a Tavern Law concept")
+        d = parse_date(date_str)
+        settings = settings_store.all_settings(conn, venue["id"])
+        look = int(settings["tl_deposit_lookback_days"])
+        ledger = sync.deposit_ledger(conn, venue["id"], d - timedelta(days=look))
+        # "8/22" and "08/22" as a party would write it on the ticket note
+        marks = (f"{d.month}/{d.day}", f"{d.month:02d}/{d.day:02d}")
+        for dep in ledger:
+            note = (dep.get("note") or "")
+            dep["suggested"] = (dep["attached_to"] is None
+                                and any(m in note for m in marks))
+        return {"date": d.isoformat(), "lookback_days": look,
+                "deposits": ledger}
+
+    @app.put("/api/days/{date_str}/event-deposits")
+    def set_event_deposits(date_str: str, body: EventDepositsBody, user: User,
+                           conn: DB, venue: Venue):
+        """Attach (or detach) event deposits, and re-derive the day's event
+        tips from them.
+
+        Event tips = whatever rode on the event's own tickets + every attached
+        deposit. Recomputed here rather than typed, so the number can always
+        be traced back to the lines that made it. A deposit already attached
+        to another day is refused: that money would otherwise be paid twice.
+        """
+        if venue["tip_model"] != "POOL_HOURS":
+            raise HTTPException(422, "event deposits are a Tavern Law concept")
+        d = parse_date(date_str)
+        row = day_row(conn, venue["id"], d)
+        if row is None:
+            raise HTTPException(422, "pull or enter this day first")
+        if row["status"] == "finalized":
+            raise HTTPException(409, "day is finalized — an admin must reopen it first")
+        if row["square_json"] is None:
+            raise HTTPException(422, "this day has no Square pull to attach to")
+
+        settings = settings_store.all_settings(conn, venue["id"])
+        look = int(settings["tl_deposit_lookback_days"])
+        ledger = {dep["deposit_id"]: dep for dep in
+                  sync.deposit_ledger(conn, venue["id"], d - timedelta(days=look))}
+        wanted = list(dict.fromkeys(body.deposit_ids))
+        for did in wanted:
+            dep = ledger.get(did)
+            if dep is None:
+                raise HTTPException(422, f"no such event deposit: {did}")
+            if dep["attached_to"] not in (None, d.isoformat()):
+                raise HTTPException(
+                    409, f"that deposit is already attached to {dep['attached_to']}")
+
+        sq = json.loads(row["square_json"])
+        attached = [ledger[did] for did in wanted]
+        total = (sq.get("raw", {}).get("event_ticket_tips_cents") or 0) \
+            + sum(dep["gross_cents"] for dep in attached)
+        inputs = json.loads(row["inputs_json"])
+        before = inputs.get("event_tips_cents", 0)
+        inputs["event_deposit_ids"] = wanted
+        inputs["event_tips_cents"] = total
+        # keep the pull's own view in step, so the day reads "from Square"
+        # rather than showing this as a manager override of itself
+        sq["values"]["event_tips_cents"] = total
+        sq.setdefault("raw", {})["event_deposits_attached"] = attached
+
+        emps = employees_map(conn, venue["id"])
+        computed = compute_or_422(conn, venue, inputs, emps)  # validate first
+        now = utcnow()
+        conn.execute(
+            "UPDATE day SET inputs_json = ?, square_json = ?, updated_at = ?,"
+            " updated_by = ? WHERE id = ?",
+            (json.dumps(inputs), json.dumps(sq), now, user["id"], row["id"]),
+        )
+        audit(conn, venue["id"], user["id"], "event_deposits_set", "day",
+              d.isoformat(), json.dumps({
+                  "deposit_ids": wanted, "event_tips_cents": total,
+                  "was": before}))
         conn.commit()
         return day_payload(conn, venue, d)
 

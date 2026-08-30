@@ -43,7 +43,19 @@ EMPTY_INPUTS = {
     "foh_hours": {},
     # employee_ids working the host/door that day -> half tip credit per hour
     # (tl_door_weight). Absent in pre-2026-07-29 snapshots; treated as empty.
+    # Since 2026-08-29 this is the manual OVERRIDE: a Host job on the
+    # timecard sets the weight by itself, and this is how a shift clocked in
+    # under the wrong job gets fixed without editing Square.
     "door_worked": [],
+    # employee_id -> exact weight string from the pull, e.g. "1/2" for a
+    # door-only night or "5/6" for five floor hours and one on the door.
+    # Absent on hand-entered days and on every day pulled before 2026-08-29.
+    "foh_role_weights": {},
+    # deposit ids ("<order_id>:<line_uid>") the manager attached to this day.
+    # The money is already inside event_tips_cents; these are kept so a
+    # deposit can never be attached to two events and so the day says where
+    # its event tips came from.
+    "event_deposit_ids": [],
 }
 
 EMPTY_INPUTS_LF = {
@@ -81,6 +93,10 @@ def compute_outputs(inputs: dict, employees: dict[int, dict],
     foh_hours = {int(k): v for k, v in inputs["foh_hours"].items()}
     # door_worked is absent from snapshots predating the 2026-07-29 ruling
     door_ids = {int(e) for e in inputs.get("door_worked") or ()}
+    # Weights the pull derived from each shift's Square job. The manual
+    # door toggle below overrides them, which is its whole purpose.
+    pulled_weights = {int(k): Fraction(str(v))
+                      for k, v in (inputs.get("foh_role_weights") or {}).items()}
 
     problems = []
     for eid in boh_ids:
@@ -95,7 +111,7 @@ def compute_outputs(inputs: dict, employees: dict[int, dict],
             problems.append(f"unknown employee id {eid} in FOH hours")
         elif emp["pool_role"] == "BOH":
             problems.append(f"{emp['display_name']} is BOH, not FOH")
-    for eid in sorted(door_ids):
+    for eid in sorted(door_ids | set(pulled_weights)):
         emp = employees.get(eid)
         if emp is None:
             problems.append(f"unknown employee id {eid} marked on the door")
@@ -117,7 +133,11 @@ def compute_outputs(inputs: dict, employees: dict[int, dict],
             boh_worked=[str(e) for e in boh_ids],
             foh_hours={str(k): v for k, v in foh_hours.items()},
             excluded=excluded,
-            foh_role_weights={str(e): door_w for e in door_ids},
+            foh_role_weights={
+                **{str(e): w for e, w in pulled_weights.items()},
+                # a hand-marked door shift wins over whatever job was clocked
+                **{str(e): door_w for e in door_ids},
+            },
         )
     except ManagerInPoolError as exc:
         ids = [i for i in excluded if i in str(exc)]
@@ -160,7 +180,14 @@ def compute_outputs(inputs: dict, employees: dict[int, dict],
                     "employee_id": int(eid),
                     "name": name(eid),
                     "hours": foh_hours[int(eid)],
-                    "door": int(eid) in door_ids,
+                    # "door" now means *any* reduced tip credit, from a Host
+                    # job on the timecard as well as a hand-marked shift; the
+                    # exact rate is on `weight` for a split night ("5/6").
+                    "door": (int(eid) in door_ids
+                             or int(eid) in pulled_weights),
+                    "door_marked": int(eid) in door_ids,
+                    "weight": str(door_w if int(eid) in door_ids
+                                  else pulled_weights.get(int(eid), 1)),
                     "weighted_hours": result.weighted_hours.get(eid, 0.0),
                     "tips_cents": result.foh_payout_cents[eid],
                     "gratuity_cents": result.gratuity_payout_cents[eid],

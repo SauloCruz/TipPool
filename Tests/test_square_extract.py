@@ -2,6 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
+from fractions import Fraction
 
 from engine import TippableWindow
 
@@ -9,6 +10,8 @@ from app.square_extract import (
     build_catalog_lookup,
     extract_auto_gratuity,
     extract_credit_tips,
+    extract_event_items,
+    extract_event_tips,
     extract_food_sales,
     extract_timecards,
     extract_timecards_poq,
@@ -190,8 +193,20 @@ EMPS = {
 }
 
 
-def timecard(tmid, start, end, declared=0, breaks=None):
-    tc = {"team_member_id": tmid, "start_at": start, "declared_cash_tip_money": money(declared)}
+# Since 2026-08-29 the SHIFT decides the pool role, so every timecard carries
+# the Square job it was clocked in under. These mirror the live Tavern Law
+# jobs; DOOR is FOH at tl_door_weight.
+JOB_ROLES = {"Bartender": "FOH", "Server": "FOH", "Host": "DOOR",
+             "Kitchen Staff": "BOH", "Bar Manager": "EXCLUDED",
+             "Manager": "EXCLUDED", "Owner": "EXCLUDED"}
+DEFAULT_JOB = {"TM_BREE": "Bartender", "TM_KELLY": "Bartender",
+               "TM_BENITO": "Kitchen Staff", "TM_BOSS": "Owner"}
+
+
+def timecard(tmid, start, end, declared=0, breaks=None, job=None):
+    tc = {"team_member_id": tmid, "start_at": start,
+          "declared_cash_tip_money": money(declared),
+          "wage": {"title": job or DEFAULT_JOB.get(tmid, "Bartender")}}
     if end:
         tc["end_at"] = end
     if breaks:
@@ -199,10 +214,12 @@ def timecard(tmid, start, end, declared=0, breaks=None):
     return tc
 
 
-def run_extract(timecards):
+def run_extract(timecards, job_roles=None, door_weight=Fraction(1, 2)):
     # 0.05 = the app default since the 2026-07-29 owner ruling: credited
     # hours step in 0.05 and always round UP (supersedes the 0.01 ruling)
-    return extract_timecards(timecards, EMPS, DAY, WINDOWS, TZ, Decimal("0.05"))
+    return extract_timecards(timecards, EMPS, DAY, WINDOWS, TZ, Decimal("0.05"),
+                             job_roles=job_roles or JOB_ROLES,
+                             door_weight=door_weight)
 
 
 class TestTimecards:
@@ -217,12 +234,15 @@ class TestTimecards:
         assert out["cash_tips_cents"] == 4000
         assert out["issues"] == []
 
-    def test_manager_timecard_fully_ignored(self):
+    def test_excluded_job_earns_nothing_but_its_cash_is_pooled(self):
+        # Owner 2026-08-29: "my hours don't count, but any tip I capture goes
+        # into the pool as I cannot retain them." Supersedes the older rule
+        # that dropped a manager's timecard whole, declared cash included.
         out = run_extract([
             timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z", declared=1000),
             timecard("TM_BOSS", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z", declared=9900),
         ])
-        assert out["cash_tips_cents"] == 1000  # boss's declaration excluded
+        assert out["cash_tips_cents"] == 10900
         assert "9" not in out["foh_hours"] and 9 not in out["boh_worked"]
 
     def test_unpaid_break_deducted_paid_not(self):
@@ -259,7 +279,8 @@ class TestTimecards:
         blocking = [i for i in out["issues"] if i["severity"] == "blocking"]
         assert blocking[0]["code"] == "unmapped_team_member"
         assert blocking[0]["detail"] == ["TM_UNKNOWN"]
-        assert set(blocking[0]["blocks"]) == {"foh_hours", "boh_worked", "cash_tips_cents"}
+        assert set(blocking[0]["blocks"]) == {"foh_hours", "boh_worked",
+                                              "cash_tips_cents", "foh_role_weights"}
 
     def test_all_zero_declarations_flagged(self):
         out = run_extract([
@@ -433,3 +454,180 @@ class TestExcludedStaffCashStillPools:
         assert out["cash_tips_cents"] == 15300      # both, not just the server
         roles = {s["name"]: s["role"] for s in out["shifts"]}
         assert roles["Owner"] == "OWNER"            # shift kept, earns nothing
+
+
+class TestJobDrivenRoles:
+    """The shift decides the pool role, not the person (owner 2026-08-29).
+    Tavern Law staff hold two Square jobs — a bartender who also manages, a
+    server who also hosts — so the job clocked in under is what it is worth.
+    """
+
+    def test_door_job_earns_half_credit(self):
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z",
+                     job="Host"),
+        ])
+        # hours reported as worked, weight carries the halving
+        assert out["foh_hours"] == {"1": 6.0}
+        assert out["foh_role_weights"] == {"1": "1/2"}
+
+    def test_floor_job_carries_no_weight_at_all(self):
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z"),
+        ])
+        assert out["foh_role_weights"] == {}
+
+    def test_split_floor_and_door_night_blends(self):
+        # 4 h on the floor at full credit + 2 h on the door at half = 5 of 6
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T04:00:00Z"),
+            timecard("TM_BREE", "2026-07-04T04:00:00Z", "2026-07-04T06:00:00Z",
+                     job="Host"),
+        ])
+        assert out["foh_hours"] == {"1": 6.0}
+        assert out["foh_role_weights"] == {"1": "5/6"}
+
+    def test_door_weight_is_configurable(self):
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z",
+                     job="Host"),
+        ], door_weight=Fraction(3, 4))
+        assert out["foh_role_weights"] == {"1": "3/4"}
+
+    def test_same_person_manager_night_and_bartender_night(self):
+        # Jacob Ruley's real August: Bar Manager some nights, Bartender others.
+        # Only the bartending hours reach the pool.
+        emps = {"TM_JACOB": {"id": 7, "display_name": "Jacob", "pool_role": "FOH"}}
+        mgr = extract_timecards(
+            [timecard("TM_JACOB", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z",
+                      declared=1200, job="Bar Manager")],
+            emps, DAY, WINDOWS, TZ, Decimal("0.05"), job_roles=JOB_ROLES)
+        assert mgr["foh_hours"] == {} and mgr["boh_worked"] == []
+        assert mgr["cash_tips_cents"] == 1200          # collected, so pooled
+        bar = extract_timecards(
+            [timecard("TM_JACOB", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z",
+                      job="Bartender")],
+            emps, DAY, WINDOWS, TZ, Decimal("0.05"), job_roles=JOB_ROLES)
+        assert bar["foh_hours"] == {"7": 6.0}
+
+    def test_unmapped_job_blocks_the_day(self):
+        out = run_extract([
+            timecard("TM_BREE", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z",
+                     job="Sommelier"),
+        ])
+        blocking = [i for i in out["issues"] if i["severity"] == "blocking"]
+        assert blocking[0]["code"] == "unmapped_job_title"
+        assert blocking[0]["detail"] == ["Sommelier"]
+        assert out["foh_hours"] == {}
+
+    def test_job_contradicting_the_staff_record_warns(self):
+        out = run_extract([
+            timecard("TM_BENITO", "2026-07-04T00:00:00Z", "2026-07-04T06:00:00Z",
+                     job="Bartender"),
+        ])
+        warn = [i for i in out["issues"] if i["code"] == "job_role_mismatch"]
+        assert warn and "Benito" in warn[0]["detail"][0]
+        assert out["foh_hours"] == {"4": 6.0}   # the job still wins
+
+
+# ---------- private events (Tavern Law) ----------
+
+EVENT_CATS = {"CAT_EVENT": {"name": "Events & Catering", "group": "EVENT"},
+              "CAT_FOOD": {"name": "Food", "group": "FOOD"}}
+EVENT_LOOKUP = {
+    "V_EVFOOD": {"category_id": "CAT_EVENT", "category_name": "Events & Catering",
+                 "item_name": "Event Food Packages"},
+    "V_EVBEV": {"category_id": "CAT_EVENT", "category_name": "Events & Catering",
+                "item_name": "Event Beverage Package"},
+    "V_EVDEP": {"category_id": "CAT_EVENT", "category_name": "Events & Catering",
+                "item_name": "Event Deposit"},
+    "V_BURGER": {"category_id": "CAT_FOOD", "category_name": "Food",
+                 "item_name": "Tavern Burger"},
+}
+EVENT_CFG = {"food_contains": "food", "deposit_contains": "deposit"}
+
+
+def _li(var, cents, uid="u1", note=None):
+    return {"uid": uid, "catalog_object_id": var, "name": "x",
+            "gross_sales_money": money(cents), "note": note}
+
+
+class TestEventItems:
+    def test_every_event_food_line_counts(self):
+        # 8/22 rang $440 and $75 on two tickets; 8/07's second line was missed
+        # by hand and short-changed the kitchen.
+        orders = [{"id": "O1", "line_items": [_li("V_EVFOOD", 44000)]},
+                  {"id": "O2", "line_items": [_li("V_EVFOOD", 7500)]}]
+        out = extract_event_items(orders, EVENT_LOOKUP, EVENT_CATS, EVENT_CFG)
+        assert out["event_food_cents"] == 51500
+
+    def test_beverage_and_room_held_out_and_reported(self):
+        orders = [{"id": "O1", "line_items": [_li("V_EVBEV", 157500)]}]
+        out = extract_event_items(orders, EVENT_LOOKUP, EVENT_CATS, EVENT_CFG)
+        assert out["event_food_cents"] == 0
+        assert out["other_cents"] == 157500
+        assert out["other_lines"][0]["item"] == "Event Beverage Package"
+
+    def test_event_lines_never_reach_food_sales(self):
+        orders = [{"id": "O1", "line_items": [_li("V_EVFOOD", 44000),
+                                              _li("V_BURGER", 2100, uid="u2")]}]
+        food = extract_food_sales(orders, EVENT_LOOKUP, EVENT_CATS)
+        assert food["food_sales_cents"] == 2100
+        assert not [i for i in food["issues"] if i["severity"] == "blocking"]
+
+    def test_deposit_is_offered_not_counted(self):
+        orders = [{"id": "O1", "created_at": "2026-08-16T04:27:36Z",
+                   "tenders": [{"id": "3p1baGg6AvlBOMpDR6zL8orELraZY"}],
+                   "line_items": [_li("V_EVDEP", 56924, note="Deposit for 8/22")]}]
+        out = extract_event_items(orders, EVENT_LOOKUP, EVENT_CATS, EVENT_CFG)
+        assert out["event_food_cents"] == 0 and out["other_cents"] == 0
+        dep, = out["deposits"]
+        assert dep["gross_cents"] == 56924
+        assert dep["deposit_id"] == "O1:u1"
+        assert dep["receipt"] == "3p1b"
+        assert dep["note"] == "Deposit for 8/22"
+
+    def test_deposit_note_falls_back_to_the_tender(self):
+        orders = [{"id": "O1", "created_at": "2026-08-16T04:27:36Z",
+                   "tenders": [{"id": "T1", "note": "Jacob O'Brien Deposit for 8/22"}],
+                   "line_items": [_li("V_EVDEP", 56924)]}]
+        out = extract_event_items(orders, EVENT_LOOKUP, EVENT_CATS, EVENT_CFG)
+        assert out["deposits"][0]["note"] == "Jacob O'Brien Deposit for 8/22"
+
+
+class TestEventTips:
+    CFG = {"catalog_object_id": None, "name_contains": "gratuity"}
+
+    def test_gratuity_on_an_event_ticket_is_event_money(self):
+        # the real 8/22: a $75 event-food ticket carrying $55.80 of gratuity
+        orders = [{"id": "O2", "line_items": [_li("V_EVFOOD", 7500)],
+                   "service_charges": [{"type": "AUTO_GRATUITY",
+                                        "applied_money": money(5580)}]}]
+        pays = [{"order_id": "O2", "status": "COMPLETED", "card_details": {},
+                 "tip_money": money(0), "total_money": money(37012)}]
+        out = extract_event_tips(orders, pays, ["O2"], self.CFG)
+        assert out["event_tips_cents"] == 5580
+
+    def test_card_tip_on_an_event_ticket_is_event_money(self):
+        orders = [{"id": "O2", "line_items": [_li("V_EVFOOD", 7500)]}]
+        pays = [{"order_id": "O2", "status": "COMPLETED", "card_details": {},
+                 "tip_money": money(9000), "total_money": money(50000)}]
+        out = extract_event_tips(orders, pays, ["O2"], self.CFG)
+        assert out["event_tips_cents"] == 9000
+
+    def test_ordinary_ticket_untouched(self):
+        orders = [{"id": "O3", "line_items": [_li("V_BURGER", 2100)],
+                   "service_charges": [{"type": "AUTO_GRATUITY",
+                                        "applied_money": money(2660)}]}]
+        out = extract_event_tips(orders, [], ["O2"], self.CFG)
+        assert out["event_tips_cents"] == 0
+
+    def test_fully_refunded_event_ticket_returns_its_gratuity(self):
+        orders = [{"id": "O2", "line_items": [_li("V_EVFOOD", 7500)],
+                   "service_charges": [{"type": "AUTO_GRATUITY",
+                                        "applied_money": money(5580)}]}]
+        pays = [{"order_id": "O2", "status": "COMPLETED", "card_details": {},
+                 "tip_money": money(0), "total_money": money(37012),
+                 "refunded_money": money(37012)}]
+        out = extract_event_tips(orders, pays, ["O2"], self.CFG)
+        assert out["event_tips_cents"] == 0

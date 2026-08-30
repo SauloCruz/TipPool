@@ -342,7 +342,12 @@ async function renderDay(dateArg) {
     return parseFloat((Math.ceil((h / inc).toFixed(6)) * inc).toFixed(2));
   }
   function collectInputs() {
-    const out = { boh_worked: [], foh_hours: {}, door_worked: [] };
+    const out = { boh_worked: [], foh_hours: {}, door_worked: [],
+                  // derived by the pull from each shift's Square job, and
+                  // attached by hand on this screen — round-tripped so a save
+                  // of the hours never drops either
+                  foh_role_weights: inputs.foh_role_weights || {},
+                  event_deposit_ids: inputs.event_deposit_ids || [] };
     for (const key of [...STEPPER_MONEY.map(([k]) => k),
                        "event_food_sales_cents", "event_tips_cents"]) {
       out[key] = centsFromInput(moneyEls[key]);
@@ -526,13 +531,23 @@ async function renderDay(dateArg) {
 
       // Door/host shift: per-day, not a fixed role (staff work dual roles).
       // Halves this person's tip + gratuity credit for the night.
+      // A Host job on the timecard says so by itself — then the rate is not a
+      // decision anyone makes here and the button becomes a read-out. The
+      // button remains for a shift clocked in under the wrong job.
+      const pulledWeight = (inputs.foh_role_weights || {})[e.id]
+                        ?? (inputs.foh_role_weights || {})[String(e.id)];
       const doorState = { checked: (inputs.door_worked || []).includes(e.id) };
       doorChecks[e.id] = doorState;
-      const doorBtn = el("button", {
-        class: `doorbtn ${doorState.checked ? "on" : ""}`, type: "button",
-        title: "Worked the host/door station — half tip credit per hour",
-        ...(finalized ? { disabled: "" } : {}),
-      }, "Door");
+      const doorBtn = pulledWeight
+        ? el("span", { class: "doorbtn auto",
+            title: `Clocked in on a host/door job — ${pulledWeight} of an hour's `
+                 + "tip credit per hour worked, from Square" },
+            pulledWeight === "1/2" ? "Door" : `Door ${pulledWeight}`)
+        : el("button", {
+            class: `doorbtn ${doorState.checked ? "on" : ""}`, type: "button",
+            title: "Worked the host/door station — half tip credit per hour",
+            ...(finalized ? { disabled: "" } : {}),
+          }, "Door");
 
       const row = el("div", { class: `hrow ${missing ? "warnrow" : ""}` },
         el("div", { class: "who" },
@@ -541,7 +556,7 @@ async function renderDay(dateArg) {
         el("div", { class: "row", style: "flex:none; gap:8px" },
           doorBtn, el("div", { style: "flex:none" }, valueBtn, editWrap)));
 
-      doorBtn.addEventListener("click", () => {
+      if (!pulledWeight) doorBtn.addEventListener("click", () => {
         if (finalized) return;
         doorState.checked = !doorState.checked;
         doorBtn.classList.toggle("on", doorState.checked);
@@ -619,6 +634,75 @@ async function renderDay(dateArg) {
         el("div", { class: "amt" }, el("span", { class: "cur" }, "$"), input)));
     }
     p.append(evGrid);
+    renderEventDetail(p);
+  }
+
+  /* Where the event money came from, and the deposit picker.
+     The deposit is the party's gratuity and is rung days or weeks ahead of
+     the night, so it can never turn up in this day's own pull — the manager
+     attaches it here. Only some carry a note naming the date, so nothing is
+     parsed: a matching note is merely floated to the top as a suggestion. */
+  function renderEventDetail(p) {
+    const ev = sq?.event;
+    if (!ev) return;
+    if (ev.ticket_tips_cents) {
+      p.append(el("div", { class: "note" },
+        `${fmt(ev.ticket_tips_cents)} of tips and gratuity rode on the event's `
+        + "own tickets and is already in Event tips."));
+    }
+    if (ev.other_lines?.length) {
+      const list = el("div", { class: "heldout" },
+        ...ev.other_lines.map((l) => el("div", { class: "hrowline" },
+          el("span", {}, l.item), el("span", {}, fmt(l.gross_cents)))));
+      p.append(el("div", { class: "note" },
+        el("div", {}, `${fmt(ev.other_cents)} of event charges are out of every `
+          + "pool and out of food sales:"), list));
+    }
+    const depWrap = el("div", { class: "card deplist" },
+      el("div", { class: "note" }, "Looking for deposits…"));
+    p.append(el("div", { class: "seclabel" }, "Event deposit · rung ahead of the night"),
+             depWrap);
+
+    api(`/api/days/${dateStr}/event-deposits`).then((res) => {
+      depWrap.textContent = "";
+      const attached = new Set(inputs.event_deposit_ids || []);
+      const rows = res.deposits.filter(
+        (d) => attached.has(d.deposit_id) || d.attached_to === null);
+      if (!rows.length) {
+        depWrap.append(el("div", { class: "note" },
+          `No unattached deposit in the last ${res.lookback_days} days. Days that `
+          + "were never pulled from Square cannot show theirs."));
+        return;
+      }
+      rows.sort((a, b) => (b.suggested - a.suggested) || b.rung_on.localeCompare(a.rung_on));
+      for (const d of rows) {
+        const on = attached.has(d.deposit_id);
+        const box = el("span", { class: "box" }, on ? "✓" : "");
+        const row = el("button", {
+          class: `deprow ${on ? "on" : ""}`, type: "button",
+          ...(finalized ? { disabled: "" } : {}),
+        }, box,
+          el("span", { class: "dep-when" }, d.rung_on),
+          el("span", { class: "dep-note" },
+             d.note || `${d.item}${d.receipt ? ` · #${d.receipt}` : ""}`),
+          d.suggested ? el("span", { class: "sugg" }, "for this day") : el("span"),
+          el("span", { class: "dep-amt" }, fmt(d.gross_cents)));
+        row.addEventListener("click", async () => {
+          if (finalized) return;
+          const next = new Set(attached);
+          next.has(d.deposit_id) ? next.delete(d.deposit_id) : next.add(d.deposit_id);
+          try {
+            await api(`/api/days/${dateStr}/event-deposits`,
+                      { method: "PUT", body: { deposit_ids: [...next] } });
+          } catch (err) { toast(err.message, true); return; }
+          renderDayDispatch(dateStr);   // event tips are re-derived server-side
+        });
+        depWrap.append(row);
+      }
+    }).catch((err) => {
+      depWrap.textContent = "";
+      depWrap.append(el("div", { class: "note" }, `Could not load deposits: ${err.message}`));
+    });
   }
 
   /* ===== STEP 3 — Review ===== */
@@ -3288,8 +3372,60 @@ async function renderSettings() {
       el("h2", {}, "Host / door tip credit"),
       el("div", { class: "row" },
         el("span", { class: "hint", style: "flex:1" },
-          "Tip credit per hour for a host/door shift, marked per person per day on the Daily screen. 0.5 = half credit; 1 = no reduction. Applies to tips and auto-gratuity. Finalized days keep the rate they were locked with."),
+          "Tip credit per hour for a host/door shift. Applied automatically to any shift clocked in under a job mapped to Host/door below, and available as a per-person override on the Daily screen. 0.5 = half credit; 1 = no reduction. Applies to tips and auto-gratuity. Finalized days keep the rate they were locked with."),
         doorInput)));
+
+    /* --- POOL_HOURS: what each Square job is worth ---------------------
+       The SHIFT decides the pool role, not the person: staff hold two jobs
+       (a bartender who also manages, a server who also hosts) and the job
+       chosen at clock-in is the one that counts. A job seen on a timecard
+       but missing here blocks the day rather than being guessed at. */
+    const jobRoles = { ...(s.tl_job_roles || {}) };
+    const ROLE_LABEL = { FOH: "Front of house", DOOR: "Host / door (half credit)",
+                         BOH: "Kitchen", EXCLUDED: "Not in the pool" };
+    const jobCard = el("div", { class: "card" },
+      el("h2", {}, "What each Square job is worth"),
+      el("div", { class: "note" },
+        "Read off every timecard's job. Square marks nearly every job "
+        + "\u201ctip eligible\u201d, including Owner \u2014 that flag is ignored here. "
+        + "A job that turns up on a timecard but is missing from this list "
+        + "blocks the day rather than being guessed at."));
+    const jobRows = el("div", { class: "maprows" });
+    function jobRow(title) {
+      const sel = el("select");
+      for (const [val, label] of Object.entries(ROLE_LABEL)) {
+        sel.append(el("option", { value: val,
+          ...(jobRoles[title] === val ? { selected: "" } : {}) }, label));
+      }
+      sel.addEventListener("change", async () => {
+        const was = jobRoles[title];
+        jobRoles[title] = sel.value;
+        try {
+          await api("/api/settings", { method: "PUT", body: { tl_job_roles: jobRoles } });
+          toast(`${title} \u2192 ${ROLE_LABEL[sel.value]}`);
+        } catch (e) {
+          jobRoles[title] = was; sel.value = was; toast(e.message, true);
+        }
+      });
+      return el("div", { class: "row" },
+        el("span", { class: "hint", style: "flex:1" }, title), sel);
+    }
+    for (const title of Object.keys(jobRoles).sort()) jobRows.append(jobRow(title));
+    const newJob = el("input", { type: "text", placeholder: "Job title, exactly as Square spells it" });
+    const addJob = el("button", { class: "ghost", type: "button" }, "Add job");
+    addJob.addEventListener("click", async () => {
+      const title = newJob.value.trim();
+      if (!title) return;
+      if (title in jobRoles) { toast("that job is already listed", true); return; }
+      jobRoles[title] = "FOH";
+      try {
+        await api("/api/settings", { method: "PUT", body: { tl_job_roles: jobRoles } });
+      } catch (e) { delete jobRoles[title]; toast(e.message, true); return; }
+      newJob.value = "";
+      jobRows.append(jobRow(title));
+    });
+    jobCard.append(jobRows, el("div", { class: "row" }, newJob, addJob));
+    view.append(jobCard);
   }
 
   /* --- this user's own preferences (never anyone else's) --- */

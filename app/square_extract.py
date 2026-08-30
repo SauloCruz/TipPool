@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from fractions import Fraction
 from zoneinfo import ZoneInfo
 
 from engine import Break, TippableWindow, clip_timecard, round_hours_up
@@ -95,6 +96,121 @@ def extract_food_sales(orders: list[dict], catalog_lookup: dict[str, dict],
         issues.append({"severity": "warning", "code": "uncataloged_line_items",
                        "detail": {"gross_cents": uncataloged_cents}})
     return {"food_sales_cents": total, "issues": issues, "lines": lines}
+
+
+# ---------- private events: POOL_HOURS (Tavern Law) ----------
+
+def extract_event_items(orders: list[dict], catalog_lookup: dict[str, dict],
+                        category_map: dict[str, dict],
+                        cfg: dict | None = None) -> dict:
+    """Private-event line items, told apart from ordinary trade by their
+    Square category (group EVENT).
+
+    Tavern Law rings a contracted event as catalog items rather than under a
+    separate logon: `Event Food Packages`, `Event Beverage Package`,
+    `Event Room Fee`, `Event Taxes`, and — days or weeks ahead of the night
+    itself — an `Event Deposit`, which is the party's gratuity.
+
+    Three things come out of that (owner 2026-08-29):
+
+    * `event_food_cents` — Σ **every** line whose name contains the configured
+      food word. There is regularly more than one: 8/22 rang $440 and $75, and
+      8/07's second $60 line was missed by hand.
+    * `deposits` — every deposit line found, with its note and receipt, for
+      the day screen to offer. They are NOT counted here: a deposit belongs to
+      the event it was taken for, which is a different day, and only a human
+      can say which. See `tl_deposit_lookback_days`.
+    * `other_cents` / `other_lines` — beverage packages, room fees, event
+      taxes. Out of the pool and out of food sales, but always reported: money
+      that vanishes silently is as bad as money wrongly paid out.
+
+    None of it reaches food sales — the EVENT category is not FOOD, so
+    `extract_food_sales` already leaves it alone.
+    """
+    cfg = cfg or {}
+    food_word = (cfg.get("food_contains") or "food").lower()
+    deposit_word = (cfg.get("deposit_contains") or "deposit").lower()
+
+    food_cents = 0
+    other_cents = 0
+    food_lines, other_lines, deposits = [], [], []
+    order_ids: set[str] = set()
+    for order in orders:
+        for li in order.get("line_items", []):
+            var_id = li.get("catalog_object_id")
+            info = catalog_lookup.get(var_id) if var_id else None
+            if info is None or info["category_id"] is None:
+                continue
+            entry = category_map.get(info["category_id"])
+            if (entry or {}).get("group") != "EVENT":
+                continue
+            gross = _amount(li.get("gross_sales_money"))
+            name = info["item_name"] or li.get("name") or "?"
+            row = {"item": name, "gross_cents": gross,
+                   "order_id": order.get("id"), "note": li.get("note")}
+            order_ids.add(order.get("id"))
+            if deposit_word in name.lower():
+                tender = next(iter(order.get("tenders") or []), {})
+                deposits.append({**row,
+                                 "deposit_id": f"{order.get('id')}:{li.get('uid')}",
+                                 "receipt": (tender.get("id") or "")[:4],
+                                 "created_at": order.get("created_at"),
+                                 "note": li.get("note") or tender.get("note")})
+            elif food_word in name.lower():
+                food_cents += gross
+                food_lines.append(row)
+            else:
+                other_cents += gross
+                other_lines.append(row)
+
+    return {"event_food_cents": food_cents, "event_food_lines": food_lines,
+            "other_cents": other_cents, "other_lines": other_lines,
+            "deposits": deposits, "order_ids": sorted(order_ids)}
+
+
+def extract_event_tips(orders: list[dict], payments: list[dict],
+                       event_order_ids: Iterable[str],
+                       grat_cfg: dict | None = None,
+                       house_names: Iterable[str] = ()) -> dict:
+    """Tip money riding on an event ticket: card tips and gratuity service
+    charges on any order that carried an event line item.
+
+    Owner ruling 2026-08-29 — "any other Event Tip should roll into Event
+    Tips". The 8/22 event's second ticket carried a $55.80 auto-gratuity that
+    would otherwise have been split across every bartender on the floor
+    instead of the crew who worked the party. Refunds net off the same way
+    they do everywhere else: the refund eats the ordinary part of the check
+    first, so only the excess reaches the tip.
+    """
+    ids = set(event_order_ids or ())
+    want_id = (grat_cfg or {}).get("catalog_object_id")
+    want_name = ((grat_cfg or {}).get("name_contains") or "").lower()
+
+    pays_by_order: dict[str, list[dict]] = {}
+    for p in payments or ():
+        if p.get("status") == "COMPLETED":
+            pays_by_order.setdefault(p.get("order_id"), []).append(p)
+
+    total = 0
+    rows = []
+    for order in orders:
+        oid = order.get("id")
+        if oid not in ids:
+            continue
+        pays = pays_by_order.get(oid, [])
+        paid = sum(_amount(p.get("total_money")) for p in pays)
+        refunded = sum(_amount(p.get("refunded_money")) for p in pays)
+        sc = sum(_charge_cents(c) for c in order.get("service_charges", [])
+                 if _is_staff_gratuity(c, want_id, want_name, house_names))
+        tip = sum(_amount(p.get("tip_money")) for p in pays)
+        pool = sc + tip
+        if not pool:
+            continue
+        back = min(pool, max(0, refunded - (paid - pool))) if refunded else 0
+        total += pool - back
+        rows.append({"order_id": oid, "service_charge_cents": sc,
+                     "tips_cents": tip, "refunded_cents": back})
+    return {"event_tips_cents": total, "lines": rows}
 
 
 # ---------- payments ----------
@@ -352,11 +468,23 @@ def extract_event_money(orders: list[dict], payments: list[dict],
 
 def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
                       business_day: date, windows: dict[int, TippableWindow],
-                      tzname: str, increment: Decimal) -> dict:
+                      tzname: str, increment: Decimal,
+                      job_roles: dict[str, str] | None = None,
+                      door_weight: Fraction = Fraction(1, 2)) -> dict:
     """One pull, three inputs (CLAUDE.md §3.4): FOH tippable hours, BOH
-    worked roster, and cash tips = Σ declared_cash_tip_money over all
-    non-manager timecards. EXCLUDED (manager) timecards are ignored
-    entirely — including their declared tips.
+    worked roster, and cash tips.
+
+    Role comes from the timecard's Square job (`wage.title`), not from the
+    person (owner 2026-08-29): staff hold two jobs — a bartender who also
+    manages, a server who also hosts — and the job chosen at clock-in is what
+    the shift is worth. A `DOOR` job earns `door_weight` of an hour's tip
+    credit per hour worked; a person who works both a floor shift and a door
+    shift the same day gets a blended weight, which is exactly their credited
+    hours over their raw hours. An EXCLUDED job earns nothing at all.
+
+    Cash tips = Σ `declared_cash_tip_money` over **every** timecard, EXCLUDED
+    jobs included: an excluded person's hours earn nothing, but tips they
+    collected cannot be kept and go into the pool (owner 2026-08-29).
 
     Hours: clipped to the tippable window, then rounded UP to the next
     `increment` (0.05 h — owner ruling 2026-07-29). Clock times themselves are
@@ -366,13 +494,18 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
     tz = ZoneInfo(tzname)
     window = windows[business_day.weekday()]
     w_start, w_end = window.bounds(business_day, tz)
+    roles = dict(job_roles or {})
 
     foh_hours: dict[str, float] = {}
+    # per employee: Σ hours × the weight of the job each was worked under
+    credited: dict[str, Fraction] = {}
     boh_worked: set[int] = set()
     cash = 0
     declared_any = False
     nonzero_declared = False
     unmapped: list[str] = []
+    unmapped_jobs: list[str] = []
+    role_mismatch: list[str] = []
     missing_clockout: list[str] = []
     bad_interval: list[str] = []
     cards = []
@@ -383,25 +516,47 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
         if emp is None:
             unmapped.append(tmid)
             continue
-        if emp["pool_role"] == "EXCLUDED":
+        title = (tc.get("wage") or {}).get("title")
+        role = roles.get(title)
+        if role is None:
+            unmapped_jobs.append(title or "(no job title)")
             continue
+
         declared = _amount(tc.get("declared_cash_tip_money"))
         declared_any = True
         nonzero_declared = nonzero_declared or declared > 0
         cash += declared
 
-        if emp["pool_role"] == "BOH":
-            boh_worked.add(emp["id"])  # any BOH timecard counts, no clipping
+        if role == "EXCLUDED":
+            # Hours earn nothing by construction, but the cash above is
+            # pooled and the shift is still shown so the day explains itself.
             cards.append({"employee_id": emp["id"], "name": emp["display_name"],
-                          "role": "BOH", "declared_cents": declared})
+                          "role": "EXCLUDED", "job_title": title,
+                          "declared_cents": declared})
             continue
 
-        # FOH: needs a complete shift to compute hours
+        if role == "BOH":
+            boh_worked.add(emp["id"])  # any BOH timecard counts, no clipping
+            cards.append({"employee_id": emp["id"], "name": emp["display_name"],
+                          "role": "BOH", "job_title": title,
+                          "declared_cents": declared})
+            if emp["pool_role"] == "FOH":
+                role_mismatch.append(
+                    f"{emp['display_name']} worked {title} (kitchen) but is "
+                    f"filed as front of house")
+            continue
+
+        # FOH / DOOR: needs a complete shift to compute hours
+        if emp["pool_role"] == "BOH":
+            role_mismatch.append(
+                f"{emp['display_name']} worked {title} (front of house) but "
+                f"is filed as kitchen")
+        weight = door_weight if role == "DOOR" else Fraction(1)
         if not tc.get("end_at"):
             missing_clockout.append(emp["display_name"])
             cards.append({"employee_id": emp["id"], "name": emp["display_name"],
-                          "role": "FOH", "declared_cents": declared,
-                          "missing_clockout": True})
+                          "role": role, "job_title": title,
+                          "declared_cents": declared, "missing_clockout": True})
             continue
         # A clock-out that isn't after the clock-in (a same-minute double
         # punch, or a backwards manual edit in Square) has no duration to
@@ -413,7 +568,8 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
             local_out = t_out.astimezone(tz).strftime("%H:%M")
             bad_interval.append(f"{emp['display_name']} ({local_in} → {local_out})")
             cards.append({"employee_id": emp["id"], "name": emp["display_name"],
-                          "role": "FOH", "declared_cents": declared,
+                          "role": role, "job_title": title,
+                          "declared_cents": declared,
                           "invalid_interval": True,
                           "raw_hours": 0.0, "tippable_hours": 0.0})
             continue
@@ -430,17 +586,40 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
         key = str(emp["id"])
         tippable = float(clipped.tippable_hours)
         foh_hours[key] = round(foh_hours.get(key, 0.0) + tippable, 2)
+        credited[key] = credited.get(key, Fraction(0)) + (
+            Fraction(clipped.tippable_hours) * weight)
         cards.append({"employee_id": emp["id"], "name": emp["display_name"],
-                      "role": "FOH", "declared_cents": declared,
+                      "role": role, "job_title": title,
+                      "declared_cents": declared,
                       # raw = full shift as Square displays it (2 decimals)
                       "raw_hours": round(float(clipped.raw_hours), 2),
-                      "tippable_hours": tippable})
+                      "tippable_hours": tippable,
+                      "credited_hours": float(Fraction(clipped.tippable_hours) * weight)})
+
+    # An employee's tip credit per hour: 1 for a floor-only day, door_weight
+    # for a door-only day, and the blend in between for a split night. The
+    # engine multiplies raw hours by this, so it reproduces credited hours
+    # exactly while the day screen still shows the hours actually worked.
+    role_weights = {}
+    for key, hours in foh_hours.items():
+        raw = Fraction(str(hours))
+        if raw > 0 and credited.get(key, Fraction(0)) != raw:
+            role_weights[key] = credited[key] / raw
 
     issues = []
     if unmapped:
         issues.append({"severity": "blocking", "code": "unmapped_team_member",
                        "detail": sorted(set(unmapped)),
-                       "blocks": ["foh_hours", "boh_worked", "cash_tips_cents"]})
+                       "blocks": ["foh_hours", "boh_worked", "cash_tips_cents",
+                                  "foh_role_weights"]})
+    if unmapped_jobs:
+        issues.append({"severity": "blocking", "code": "unmapped_job_title",
+                       "detail": sorted(set(unmapped_jobs)),
+                       "blocks": ["foh_hours", "boh_worked", "cash_tips_cents",
+                                  "foh_role_weights"]})
+    if role_mismatch:
+        issues.append({"severity": "warning", "code": "job_role_mismatch",
+                       "detail": sorted(set(role_mismatch))})
     if missing_clockout:
         issues.append({"severity": "warning", "code": "missing_clockout",
                        "detail": sorted(missing_clockout)})
@@ -453,6 +632,8 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
 
     return {
         "foh_hours": {k: foh_hours[k] for k in sorted(foh_hours, key=int)},
+        "foh_role_weights": {k: str(role_weights[k])
+                             for k in sorted(role_weights, key=int)},
         "boh_worked": sorted(boh_worked),
         "cash_tips_cents": cash,
         "issues": issues,
