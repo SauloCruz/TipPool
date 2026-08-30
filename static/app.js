@@ -341,7 +341,7 @@ async function renderDay(dateArg) {
     return parseFloat((Math.ceil((h / inc).toFixed(6)) * inc).toFixed(2));
   }
   function collectInputs() {
-    const out = { boh_worked: [], foh_hours: {}, door_worked: [],
+    const out = { boh_worked: [], foh_hours: {}, contractor_hours: {}, door_worked: [],
                   // derived by the pull from each shift's Square job, and
                   // attached by hand on this screen — round-tripped so a save
                   // of the hours never drops either
@@ -354,7 +354,10 @@ async function renderDay(dateArg) {
     boh.forEach((e) => { if (bohChecks[e.id].checked) out.boh_worked.push(e.id); });
     foh.forEach((e) => {
       const h = parseFloat(hourEls[e.id].value);
-      if (h > 0) out.foh_hours[e.id] = h;
+      // A contractor's hours are always typed, and they keep their own field:
+      // putting them in foh_hours would mark that whole map an override and
+      // freeze everyone else's hours against the next pull.
+      if (h > 0) (e.is_contractor ? out.contractor_hours : out.foh_hours)[e.id] = h;
       // only meaningful alongside hours — a door mark with 0h weighs nothing
       if (h > 0 && doorChecks[e.id]?.checked) out.door_worked.push(e.id);
     });
@@ -506,7 +509,8 @@ async function renderDay(dateArg) {
     for (const e of foh) {
       const missing = missingNames.has(e.display_name) && !(e.id in inputs.foh_hours) &&
                       !(String(e.id) in inputs.foh_hours);
-      const initial = inputs.foh_hours[e.id] ?? inputs.foh_hours[String(e.id)] ?? 0;
+      const src = e.is_contractor ? (inputs.contractor_hours || {}) : inputs.foh_hours;
+      const initial = src[e.id] ?? src[String(e.id)] ?? 0;
       const hidden = el("input", { type: "hidden", value: String(initial) });
       hourEls[e.id] = hidden;
 
@@ -543,7 +547,13 @@ async function renderDay(dateArg) {
       const row = el("div", { class: `hrow ${missing ? "warnrow" : ""}` },
         el("div", { class: "who" },
           el("div", { class: "row", style: "gap:8px" },
-            el("span", { class: "nm" }, e.display_name), rowBadge), sub),
+            el("span", { class: "nm" }, e.display_name),
+            e.is_contractor
+              ? el("span", { class: "rolechip contract",
+                             title: "Contract labour — paid directly, hours typed here" },
+                   "contract")
+              : null,
+            rowBadge), sub),
         el("div", { class: "row", style: "flex:none; gap:8px" },
           doorBtn, el("div", { style: "flex:none" }, valueBtn, editWrap)));
 
@@ -607,7 +617,10 @@ async function renderDay(dateArg) {
         const keep = showAll
           || (parseFloat(r.hidden.value) || 0) > 0
           || (r.missing && !clockResolved.has(r.emp.id))
-          || doorChecks[r.emp.id]?.checked;
+          || doorChecks[r.emp.id]?.checked
+          // contract labour has no timecard, so their hours are ALWAYS 0
+          // until typed — hiding them is how a night's work goes unpaid
+          || r.emp.is_contractor;
         r.row.hidden = !keep;
         // the button removes itself once used, so only touch a live one
         if (r.skipBtn?.isConnected) r.skipBtn.hidden = !keep;
@@ -1016,6 +1029,11 @@ async function renderDay(dateArg) {
         sub.textContent = `Door shift — ${credited}h credited of ${parseFloat(cur.toFixed(2))}h worked`;
       } else if (overridden) {
         sub.textContent = "manual override · audit-logged";
+      } else if (emp.is_contractor) {
+        const rate = emp.hourly_rate_cents;
+        sub.textContent = rate
+          ? `Contract labour · ${fmt(rate)}/h — no Square timecard, type the hours`
+          : "Contract labour — no Square timecard, type the hours";
       } else {
         sub.textContent = sq ? "from Square timecards" : "manual entry";
       }
@@ -2281,6 +2299,49 @@ async function renderExport(anchorArg) {
       `Flagged days need review: ${p.flagged_dates.join(", ")}`));
   }
 
+  // Contract labour: what to hand each person directly, and where they stand
+  // against the $600 calendar-year reporting threshold. Only rendered when
+  // the venue actually uses contract labour.
+  (async () => {
+    let cp;
+    try {
+      cp = await api(`/api/periods/${anchor}/contractors`
+                     + `${p.scheme ? `?scheme=${p.scheme}` : ""}`);
+    } catch { return; }
+    if (!cp.contractors.length) return;
+    const card = el("div", { class: "card" },
+      el("h2", {}, "Contract labour — pay directly"),
+      el("div", { class: "note" },
+        `Not on payroll and not on the payroll sheet. Year-to-date totals are `
+        + `for ${cp.year} at this venue; report a contractor once they reach `
+        + `${fmt(cp.threshold_cents)}.`));
+    const t = el("div", { class: "ptable" });
+    t.append(el("div", { class: "prow phead" },
+      el("span", { class: "cname" }, "Name"), el("span", { class: "chrs" }, "Hrs"),
+      el("span", { class: "ctips" }, "Wages"), el("span", { class: "cgrat" }, "Tips"),
+      el("span", { class: "ctake" }, "Pay"), el("span", { class: "ctake" }, "YTD")));
+    for (const c of cp.contractors) {
+      t.append(el("div", { class: "prow" },
+        el("span", { class: "cname" }, esc(c.name),
+          c.w9_received ? null
+            : el("span", { class: "src manual", title: "No W-9 on file" }, "no W-9")),
+        el("span", { class: "chrs" }, hrs(c.hours)),
+        el("span", { class: "ctips" }, fmt(c.wages_cents)),
+        el("span", { class: "cgrat" }, fmt(c.tips_cents)),
+        el("span", { class: "ctake" }, fmt(c.total_cents)),
+        el("span", { class: "ctake", style: c.crosses_threshold ? "color:var(--warn)" : "" },
+          fmt(c.ytd_total_cents))));
+    }
+    card.append(t);
+    for (const c of cp.contractors.filter((x) => x.crosses_threshold)) {
+      card.append(el("div", { class: "flag" },
+        `${c.name} has reached ${fmt(c.ytd_total_cents)} for ${cp.year} — past the `
+        + `${fmt(cp.threshold_cents)} reporting threshold`
+        + (c.w9_received ? "." : ", and there is no W-9 on file.")));
+    }
+    view.append(card);
+  })();
+
   // per-period editable cash payout (LF): pre-filled to the next amount
   // ending in zero; edits persist for this period + scheme
   async function saveCashPayout(employeeId, cents) {
@@ -3123,7 +3184,12 @@ async function renderEmployees() {
           e.square_team_member_id
             ? el("span", { class: "src square", title: e.square_team_member_id }, "Square")
             : null,
-          e.in_payroll ? null : el("span", { class: "src manual" }, "no payroll")),
+          e.is_contractor
+            ? el("span", { class: "src manual",
+                           title: `Contract labour${e.hourly_rate_cents ? " · " + fmt(e.hourly_rate_cents) + "/h" : ""}`
+                                  + (e.w9_received ? " · W-9 on file" : " · NO W-9 on file") },
+                 e.w9_received ? "contract" : "contract · no W-9")
+            : (e.in_payroll ? null : el("span", { class: "src manual" }, "no payroll"))),
         el("div", { class: "row" }, ...(poolFlag ? [poolFlag] : []),
           payrollFlag, roleSel, activeBtn)));
     }
@@ -3135,10 +3201,32 @@ async function renderEmployees() {
     ...roleOptions.map((r) =>
       el("option", { value: r }, r === "EXCLUDED" ? "EXCLUDED (manager/owner)" : r)));
   const addBtn = el("button", {}, "Add");
+  // Contract labour: someone who works shifts and shares the pool but has no
+  // Square account and is paid directly against a W-9. Their hours are typed
+  // on the day screen, and the app tracks the $600 calendar-year total.
+  const contractBox = el("input", { type: "checkbox" });
+  const rateInput = el("input", { inputmode: "decimal", placeholder: "0.00",
+                                  style: "width:110px" });
+  const w9Box = el("input", { type: "checkbox" });
+  const contractFields = el("div", { hidden: "" },
+    el("label", {}, "Hourly rate paid directly"),
+    el("div", { class: "money" }, el("span", { class: "cur" }, "$"), rateInput),
+    el("label", { class: "row", style: "gap:10px;align-items:center;margin-top:8px" },
+      el("span", { style: "flex:none;display:flex" }, w9Box),
+      el("span", { style: "flex:1" }, "W-9 on file")));
+  contractBox.addEventListener("change", () => {
+    contractFields.hidden = !contractBox.checked;
+  });
   addBtn.addEventListener("click", async () => {
     if (!name.value.trim()) return;
+    const body = { display_name: name.value.trim(), pool_role: role.value };
+    if (contractBox.checked) {
+      body.is_contractor = true;
+      body.hourly_rate_cents = centsFromInput(rateInput);
+      body.w9_received = w9Box.checked;
+    }
     try {
-      await api("/api/employees", { method: "POST", body: { display_name: name.value.trim(), pool_role: role.value } });
+      await api("/api/employees", { method: "POST", body });
       toast("Added");
       route();
     } catch (e) { toast(e.message, true); }
@@ -3147,8 +3235,13 @@ async function renderEmployees() {
     el("h2", {}, "Add employee"),
     el("label", {}, "Name"), name,
     el("label", {}, "Pool role"), role,
+    el("label", { class: "row", style: "gap:10px;align-items:center;margin-top:10px" },
+      el("span", { style: "flex:none;display:flex" }, contractBox),
+      el("span", { style: "flex:1" }, "Contract labour — no Square account, paid directly")),
+    contractFields,
     el("div", { style: "margin-top:12px" }, addBtn),
-    el("div", { class: "note" }, "EXCLUDED staff are hard-blocked from every pool (WA law). Days that reference them will refuse to compute.")));
+    el("div", { class: "note" }, "EXCLUDED staff are hard-blocked from every pool (WA law). Days that reference them will refuse to compute."),
+    el("div", { class: "note" }, "Contract labour shares the tip pool like anyone else, but never appears on the payroll entry sheet. When you move someone onto payroll, link their Square account and clear the contract flag — the same record keeps every night they worked.")));
 }
 
 /* ---------- settings / setup (admin, M3) ---------- */

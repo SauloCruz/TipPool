@@ -657,3 +657,6 @@ td.tot, th.tot { font-weight: 700; }
   display: block; width: 100%; text-align: left;
 }
 .sectoggle:hover { color: var(--fg); }
+
+/* Contract labour: no Square account, hours typed by hand. */
+.rolechip.contract { background: rgba(212, 162, 78, .16); color: var(--warn, #d4a24e); }

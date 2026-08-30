@@ -47,6 +47,10 @@ STATIC_DIR = Path(__file__).parent.parent / "static"
 # informational flags: shown as reminders, never mark a day as flagged
 INFO_FLAGS = {"no_host_resplit"}
 
+# IRS 1099-NEC reporting threshold: report a contractor once the calendar-year
+# total reaches this. Counted per venue (owner 2026-08-30).
+CONTRACTOR_1099_CENTS = 60000
+
 
 # ---------- request/response models ----------
 
@@ -67,6 +71,10 @@ class DayInputsBody(BaseModel):
     auto_gratuity_cents: int = 0
     boh_worked: list[int] = []
     foh_hours: dict[int, float] = {}
+    # Contract labour hours — a separate field from foh_hours on purpose, so
+    # typing them never marks the pulled hours map as an override (see
+    # compute.EMPTY_INPUTS). Square never writes here.
+    contractor_hours: dict[int, float] = {}
     # staff working the host/door that night — half tip credit per hour
     # (tl_door_weight). Per-day, not a fixed role: staff work dual roles.
     door_worked: list[int] = []
@@ -186,6 +194,10 @@ class EmployeeBody(BaseModel):
     display_name: str = Field(min_length=1, max_length=80)
     pool_role: str = Field(pattern="^(FOH|BOH|EXCLUDED|SERVER|BUSSER|HOST)$")
     square_team_member_id: str | None = None
+    # contract labour: no Square account, paid directly against a W-9
+    is_contractor: bool = False
+    hourly_rate_cents: int | None = Field(default=None, ge=0)
+    w9_received: bool = False
 
 
 class EmployeePatch(BaseModel):
@@ -199,6 +211,12 @@ class EmployeePatch(BaseModel):
     # not a payroll employee at all — an admin login, a contractor. Keeps
     # them off the payroll entry sheet without deactivating the record.
     in_payroll: bool | None = None
+    # Contract labour (owner 2026-08-30): works shifts and shares the pool,
+    # paid directly against a W-9. Setting this forces in_payroll off — a
+    # 1099 worker must never be typed into the payroll form.
+    is_contractor: bool | None = None
+    hourly_rate_cents: int | None = Field(default=None, ge=0)
+    w9_received: bool | None = None
 
 
 class SettingsPatch(BaseModel):
@@ -535,7 +553,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             r["id"]: {"display_name": r["display_name"], "pool_role": r["pool_role"],
                       "active": bool(r["active"]),
                       "always_in_boh_pool": bool(r["always_in_boh_pool"]),
-                      "in_payroll": bool(r["in_payroll"])}
+                      "in_payroll": bool(r["in_payroll"]),
+                      "is_contractor": bool(r["is_contractor"]),
+                      "hourly_rate_cents": r["hourly_rate_cents"],
+                      "w9_received": bool(r["w9_received"])}
             for r in rows
         }
 
@@ -863,7 +884,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         links = employee_links(conn, venue["id"])
         rows = conn.execute(
             "SELECT id, display_name, pool_role, active, always_in_boh_pool,"
-            " in_payroll"
+            " in_payroll, is_contractor, hourly_rate_cents, w9_received"
             " FROM employee WHERE venue_id = ?"
             " ORDER BY pool_role, display_name",
             (venue["id"],),
@@ -877,14 +898,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             out.append(e)
         return out
 
+    def check_contractor(is_contractor, rate, tmid):
+        """Contract labour rules (owner 2026-08-30).
+
+        A rate is required because the point of recording a contractor is
+        working out what to hand them; without one the $600 calendar-year
+        total would silently undercount and the threshold would be crossed
+        unnoticed. A Square account means they are on the till and, sooner or
+        later, on payroll — the two states are exclusive, and mixing them is
+        how someone ends up on both a 1099 and a W-2 for the same shifts.
+        """
+        if not is_contractor:
+            return
+        if rate is None:
+            raise HTTPException(
+                422, "contract labour needs an hourly rate — it is what the "
+                     "$600 calendar-year total is built from")
+        if tmid:
+            raise HTTPException(
+                422, "a contractor cannot also have a Square account: link "
+                     "them to Square when you move them onto payroll, and "
+                     "clear the contractor flag at the same time")
+
     @app.post("/api/employees", status_code=201)
     def create_employee(body: EmployeeBody, admin: Admin, conn: DB, venue: Venue):
         check_role(venue, body.pool_role)
+        check_contractor(body.is_contractor, body.hourly_rate_cents,
+                         body.square_team_member_id)
         try:
             cur = conn.execute(
                 "INSERT INTO employee (venue_id, display_name, pool_role,"
-                " created_at) VALUES (?, ?, ?, ?)",
-                (venue["id"], body.display_name.strip(), body.pool_role, utcnow()),
+                " created_at, is_contractor, hourly_rate_cents, w9_received,"
+                " in_payroll) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (venue["id"], body.display_name.strip(), body.pool_role, utcnow(),
+                 int(body.is_contractor), body.hourly_rate_cents,
+                 int(body.w9_received), 0 if body.is_contractor else 1),
             )
             if body.square_team_member_id:
                 conn.execute(
@@ -903,8 +951,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # the schema (active, in_payroll) belong in the response, and a
         # hand-built dict silently drops every column added later
         out = dict(conn.execute(
-            "SELECT id, display_name, pool_role, active, always_in_boh_pool,"
-            " in_payroll FROM employee WHERE id = ?", (cur.lastrowid,)).fetchone())
+            "SELECT * FROM employee WHERE id = ?", (cur.lastrowid,)).fetchone())
         out["square_team_member_ids"] = employee_links(
             conn, venue["id"]).get(cur.lastrowid, [])
         out["square_team_member_id"] = (out["square_team_member_ids"][0]
@@ -922,6 +969,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body.pool_role is not None:
             check_role(venue, body.pool_role)
         changes = {k: v for k, v in body.model_dump().items() if v is not None}
+        want_contractor = changes.get("is_contractor", bool(row["is_contractor"]))
+        want_rate = changes.get("hourly_rate_cents", row["hourly_rate_cents"])
+        existing_link = conn.execute(
+            "SELECT 1 FROM square_link WHERE venue_id = ? AND employee_id = ?",
+            (venue["id"], employee_id)).fetchone()
+        want_link = changes.get("square_team_member_id",
+                                "keep" if existing_link else None)
+        check_contractor(want_contractor, want_rate,
+                         None if want_link in ("", None) else want_link)
+        # a 1099 worker must never reach the payroll entry sheet
+        if want_contractor:
+            changes["in_payroll"] = False
         # Square links live in square_link (one person, many accounts):
         # "" clears every link for this employee; a value ADDS a link.
         tmid = changes.pop("square_team_member_id", None)
@@ -2219,7 +2278,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "schemes": list(VENUE_SCHEMES[venue["tip_model"]]),
             "days": days_out,
             "totals": totals,
-            "employees": sorted(staff.values(), key=lambda s: s["name"]),
+            # Contract labour is paid DIRECTLY, never through payroll, so it
+            # must not reach the payroll export or its CSV — a 1099 worker
+            # imported into Square Payroll gets paid a second time. Their
+            # earnings appear on the contractor card instead, which is the
+            # only place that figure belongs.
+            "employees": sorted(
+                (s for s in staff.values()
+                 if not emps.get(s["employee_id"], {}).get("is_contractor")),
+                key=lambda s: s["name"]),
+            "contractor_employees": sorted(
+                (s for s in staff.values()
+                 if emps.get(s["employee_id"], {}).get("is_contractor")),
+                key=lambda s: s["name"]),
             # everyone who worked, tips or not — the payroll entry sheet
             "payroll": payroll,
             "draft_dates": draft_dates,
@@ -2235,6 +2306,103 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "venue": {"id": venue["id"], "name": venue["name"],
                       "slug": venue["slug"]},
             "boh_monthly": boh_monthly,
+        }
+
+    def _contractor_earnings(conn, venue, emps, start: date, end: date) -> dict[int, dict]:
+        """What each contractor earned between two dates, from finalized days.
+
+        Reads the SNAPSHOT of every finalized day, not today's recomputation,
+        so a figure that has been paid can never drift underneath the person
+        it was paid to.
+        """
+        out: dict[int, dict] = {}
+        rows = conn.execute(
+            "SELECT * FROM day WHERE venue_id = ? AND date BETWEEN ? AND ?"
+            " AND status = 'finalized' ORDER BY date",
+            (venue["id"], start.isoformat(), end.isoformat()),
+        ).fetchall()
+        for row in rows:
+            outputs = snapshot_outputs(conn, row["id"]) or {}
+            inputs = json.loads(row["inputs_json"])
+            hours_by = {int(k): float(v)
+                        for k, v in (inputs.get("contractor_hours") or {}).items()}
+            # every model names its payout rows differently; sum what is there
+            payouts: dict[int, int] = {}
+            for key in ("people", "foh", "boh"):
+                for line in outputs.get(key) or ():
+                    eid = line.get("employee_id")
+                    if eid is None:
+                        continue
+                    payouts[eid] = payouts.get(eid, 0) + sum(
+                        v for k, v in line.items()
+                        if k.endswith("_cents") and isinstance(v, int))
+            for eid, e in emps.items():
+                if not e.get("is_contractor"):
+                    continue
+                hours = hours_by.get(eid, 0.0)
+                tips = payouts.get(eid, 0)
+                if not hours and not tips:
+                    continue
+                rate = e.get("hourly_rate_cents") or 0
+                # hours priced the way the payroll sheet prices them: round the
+                # reported hours first, then multiply, so the figure matches
+                # what the manager can check by hand
+                wages = int(Decimal(str(round(hours, 2))) * rate)
+                rec = out.setdefault(eid, {
+                    "employee_id": eid, "name": e["display_name"],
+                    "hourly_rate_cents": rate,
+                    "w9_received": bool(e.get("w9_received")),
+                    "hours": 0.0, "wages_cents": 0, "tips_cents": 0,
+                    "total_cents": 0, "days": 0, "dates": [],
+                })
+                rec["hours"] = round(rec["hours"] + hours, 2)
+                rec["wages_cents"] += wages
+                rec["tips_cents"] += tips
+                rec["total_cents"] += wages + tips
+                rec["days"] += 1
+                rec["dates"].append(row["date"])
+        return out
+
+    @app.get("/api/periods/{anchor}/contractors")
+    def get_contractor_pay(anchor: str, user: User, conn: DB, venue: Venue,
+                           scheme: str | None = None):
+        """Contract labour: what to hand each person, and the running
+        calendar-year total against the $600 reporting threshold.
+
+        The threshold is counted PER VENUE per calendar year (owner
+        2026-08-30) — each venue pays its own contractors — and from
+        finalized days only, because an unfinalized night is not yet money
+        anyone is owed.
+        """
+        d = parse_date(anchor)
+        start, end = period_for_scheme(d, resolve_scheme(venue, scheme))
+        emps = employees_map(conn, venue["id"])
+        period = _contractor_earnings(conn, venue, emps, start, end)
+        ytd = _contractor_earnings(conn, venue, emps, date(d.year, 1, 1),
+                                   date(d.year, 12, 31))
+        rows = []
+        for eid, rec in sorted(period.items(), key=lambda kv: kv[1]["name"]):
+            y = ytd.get(eid, {})
+            rec["ytd_total_cents"] = y.get("total_cents", 0)
+            rec["ytd_hours"] = y.get("hours", 0.0)
+            rec["crosses_threshold"] = rec["ytd_total_cents"] >= CONTRACTOR_1099_CENTS
+            rows.append(rec)
+        # someone with nothing this period may still have crossed earlier in
+        # the year, and that is exactly when you need to know
+        for eid, y in sorted(ytd.items(), key=lambda kv: kv[1]["name"]):
+            if eid in period:
+                continue
+            rows.append({**y, "hours": 0.0, "wages_cents": 0, "tips_cents": 0,
+                         "total_cents": 0, "days": 0, "dates": [],
+                         "ytd_total_cents": y["total_cents"],
+                         "ytd_hours": y["hours"],
+                         "crosses_threshold": y["total_cents"] >= CONTRACTOR_1099_CENTS})
+        return {
+            "start": start.isoformat(), "end": end.isoformat(),
+            "year": d.year,
+            "threshold_cents": CONTRACTOR_1099_CENTS,
+            "contractors": rows,
+            "period_total_cents": sum(r["total_cents"] for r in rows),
         }
 
     @app.get("/api/periods/{anchor}")

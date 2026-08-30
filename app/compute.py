@@ -41,6 +41,13 @@ EMPTY_INPUTS = {
     "auto_gratuity_cents": 0,
     "boh_worked": [],
     "foh_hours": {},
+    # Contract labour hours, kept OUT of foh_hours on purpose (owner
+    # 2026-08-30). A contractor has no Square account, so their hours are
+    # always typed — and typing them into foh_hours would mark that whole map
+    # as a manager override, freezing EVERY person's hours against future
+    # pulls. Its own field means a re-pull keeps updating the Square staff
+    # while the contractor's typed hours stay put. {employee_id: hours}
+    "contractor_hours": {},
     # employee_ids working the host/door that day -> half tip credit per hour
     # (tl_door_weight). Absent in pre-2026-07-29 snapshots; treated as empty.
     # Since 2026-08-29 this is the manual OVERRIDE: a Host job on the
@@ -91,6 +98,13 @@ def compute_outputs(inputs: dict, employees: dict[int, dict],
     the server stores them; hours arriving here are already rounded."""
     boh_ids = [int(e) for e in inputs["boh_worked"]]
     foh_hours = {int(k): v for k, v in inputs["foh_hours"].items()}
+    # Contract labour earns its pool share exactly like anyone else; only the
+    # route the hours arrive by is different, so merge and forget.
+    contractor_hours = {int(k): v
+                        for k, v in (inputs.get("contractor_hours") or {}).items()
+                        if v}
+    for eid, h in contractor_hours.items():
+        foh_hours[eid] = foh_hours.get(eid, 0) + h
     # door_worked is absent from snapshots predating the 2026-07-29 ruling
     door_ids = {int(e) for e in inputs.get("door_worked") or ()}
     # Weights the pull derived from each shift's Square job. The manual

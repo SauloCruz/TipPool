@@ -236,3 +236,50 @@ class TestDoorHalfWeight:
         out = compute_day(credit_tips=90, foh_hours={"A": 9, "B": 0},
                           foh_role_weights={"B": DEFAULT_DOOR_WEIGHT})
         assert out.foh_payouts == {"A": 90.00, "B": 0.0}
+
+
+from app.compute import EMPTY_INPUTS, compute_outputs
+
+
+class TestContractLabour:
+    """Contract labour works shifts and shares the pool, but has no Square
+    account, so the hours are always typed (owner 2026-08-30)."""
+
+    EMPS = {
+        1: {"display_name": "Bree", "pool_role": "FOH"},
+        2: {"display_name": "Angelica", "pool_role": "FOH"},
+        3: {"display_name": "Benito", "pool_role": "BOH"},
+    }
+
+    def _day(self, **extra):
+        inputs = {**EMPTY_INPUTS, "food_sales_cents": 100000,
+                  "credit_tips_cents": 40000, "boh_worked": [3],
+                  "foh_hours": {1: 6}}
+        inputs.update(extra)
+        return compute_outputs(inputs, self.EMPS)
+
+    def test_contractor_hours_earn_a_pool_share(self):
+        out = self._day(contractor_hours={2: 6})
+        rows = {r["name"]: r for r in out["foh"]}
+        assert rows["Angelica"]["tips_cents"] > 0
+        # same hours, same money — the route the hours arrived by is invisible
+        assert rows["Angelica"]["tips_cents"] == rows["Bree"]["tips_cents"]
+
+    def test_the_pool_still_conserves(self):
+        out = self._day(contractor_hours={2: 6})
+        assert sum(r["tips_cents"] for r in out["foh"]) == out["totals"]["foh_pool_cents"]
+
+    def test_no_contractor_hours_changes_nothing(self):
+        assert self._day(contractor_hours={}) == self._day()
+
+    def test_zero_hours_does_not_create_a_payout_row(self):
+        out = self._day(contractor_hours={2: 0})
+        assert "Angelica" not in {r["name"] for r in out["foh"]}
+
+    def test_hours_add_to_a_pulled_shift_rather_than_replacing_it(self):
+        """Someone could conceivably have both — a Square shift and typed
+        contractor hours. Adding is the only safe reading; replacing would
+        silently drop whichever arrived first."""
+        out = self._day(foh_hours={1: 6, 2: 2}, contractor_hours={2: 4})
+        rows = {r["name"]: r for r in out["foh"]}
+        assert rows["Angelica"]["hours"] == 6

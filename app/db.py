@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Incremental migrations applied in order after the base schema.
 MIGRATIONS: dict[int, str] = {
@@ -121,6 +121,17 @@ MIGRATIONS: dict[int, str] = {
     # NULL = defaults, so every existing user is unaffected.
     10: """
     ALTER TABLE user ADD COLUMN prefs_json TEXT;
+    """,
+    # Contract labour: someone who works shifts and shares the tip pool but is
+    # paid directly against a W-9 rather than through payroll (owner
+    # 2026-08-30). They have no Square account, so no timecard ever arrives
+    # for them and their hours are typed. `hourly_rate_cents` is what the
+    # venue agreed to pay them; `w9_received` tracks the form that has to be
+    # on file before the $600 calendar-year reporting threshold is crossed.
+    11: """
+    ALTER TABLE employee ADD COLUMN is_contractor INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE employee ADD COLUMN hourly_rate_cents INTEGER;
+    ALTER TABLE employee ADD COLUMN w9_received INTEGER NOT NULL DEFAULT 0;
     """,
 }
 
