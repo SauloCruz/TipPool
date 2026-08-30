@@ -343,3 +343,36 @@ class TestDateNavigationOnEveryDayScreen:
         for name in self.SCREENS:
             blk = self.block(name)
             assert "location.hash = `#/day/${datePick.value}`" in blk, name
+
+
+class TestExportFeaturesAreVenueAgnostic:
+    """Payroll entry, take-home stubs and the timecard backfill are the same
+    job at every venue — a timecard is a timecard whatever the tip policy is
+    (owner 2026-08-30). Only genuinely policy-specific things stay gated."""
+
+    EXPORT = APP_JS.split("async function renderExport(")[1].split(
+        "\n/* ---------- ")[0]
+
+    def test_the_three_shared_buttons_are_not_model_gated(self):
+        for label in ("Payroll entry sheet", "Take-home stubs",
+                      "Fetch timecard data"):
+            assert label in self.EXPORT, label
+        # none of them sits inside a POINTS_HOURS branch
+        poq_arms = self.EXPORT.split('p.model === "POINTS_HOURS"')
+        for arm in poq_arms[1:]:
+            head = arm[:400]
+            for label in ("Payroll entry sheet", "Take-home stubs",
+                          "Fetch timecard data"):
+                assert label not in head, f"{label} still gated"
+
+    def test_form_4070_stays_tip_out_only(self):
+        """Not everything should be shared: Form 4070 is a tip-out venue's
+        monthly IRS report and has no meaning elsewhere."""
+        assert 'p.model === "PERCENT_TIPOUT" && p.scheme === "monthly"' in self.EXPORT
+        assert "Form 4070" in self.EXPORT
+
+    def test_paid_hours_tile_reaches_every_model(self):
+        tiles = APP_JS.split("function poolTiles(")[1].split("\n}")[0]
+        assert 'model !== "POINTS_HOURS" && t.paid_hours !== undefined' in tiles
+        # and still refuses to show a number it cannot stand behind
+        assert tiles.count("needs re-pull") >= 2

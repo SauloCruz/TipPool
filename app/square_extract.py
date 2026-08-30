@@ -625,7 +625,9 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
                           "role": role, "job_title": title,
                           "declared_cents": declared,
                           "invalid_interval": True,
-                          "raw_hours": 0.0, "tippable_hours": 0.0})
+                          "raw_hours": 0.0, "tippable_hours": 0.0,
+                          "start_at": tc["start_at"], "end_at": tc["end_at"],
+                          "rate_cents": _rate_cents(tc)})
             continue
         breaks = [
             Break(_iso(b["start_at"]).astimezone(tz), _iso(b["end_at"]).astimezone(tz),
@@ -651,7 +653,12 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
                       # need not sum to it exactly
                       "tippable_hours": round(clipped.tippable_seconds / 3600, 2),
                       "credited_hours": round(
-                          float(Fraction(clipped.tippable_seconds) * weight) / 3600, 2)})
+                          float(Fraction(clipped.tippable_seconds) * weight) / 3600, 2),
+                      # clock times and the job's rate, so period reports can
+                      # split a shift at midnight and price paid hours the way
+                      # payroll does — none of this touches the tip pool
+                      "start_at": tc["start_at"], "end_at": tc["end_at"],
+                      "rate_cents": _rate_cents(tc)})
 
     # One round-up per person per day (owner 2026-07-29: credited hours step
     # in 0.05 and always round UP).
@@ -714,6 +721,11 @@ _TITLE_ROLE_HINTS = (
     ("host", "HOST"),
     ("cook", "BOH"), ("chef", "BOH"), ("kitchen", "BOH"), ("dish", "BOH"),
 )
+
+
+def _rate_cents(tc: dict) -> int | None:
+    """The hourly rate Square recorded for the job chosen at clock-in."""
+    return ((tc.get("wage") or {}).get("hourly_rate") or {}).get("amount")
 
 
 def _role_from_title(title: str | None) -> str | None:
@@ -838,7 +850,9 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
             cards.append({"employee_id": emp["id"], "name": emp["display_name"],
                           "role": emp["pool_role"], "declared_cents": declared,
                           "invalid_interval": True, "worked_hours": 0.0,
-                          "job_title": title})
+                          "job_title": title,
+                          "start_at": tc["start_at"], "end_at": tc["end_at"],
+                          "rate_cents": _rate_cents(tc)})
             continue
         seconds = end - start
         for b in tc.get("breaks", []):
@@ -851,7 +865,10 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
         hours[key] = round(hours.get(key, 0.0) + worked, 2)
         cards.append({"employee_id": emp["id"], "name": emp["display_name"],
                       "role": emp["pool_role"], "declared_cents": declared,
-                      "worked_hours": worked, "job_title": title})
+                      "worked_hours": worked, "job_title": title,
+                      # as above: reporting only, never part of a payout
+                      "start_at": tc["start_at"], "end_at": tc["end_at"],
+                      "rate_cents": _rate_cents(tc)})
     issues = []
     if unmapped:
         issues.append({"severity": "blocking", "code": "unmapped_team_member",

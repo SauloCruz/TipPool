@@ -453,7 +453,11 @@ def _pull_values_poq(payments, orders, timecards, emp_by_tmid, settings,
 
 
 def refresh_labor_shifts(conn, client, venue, business_day: date) -> list[dict]:
-    """Re-fetch just the day's timecards and return the extracted shifts.
+    """Re-fetch just the day's timecards and return (raw key, extracted rows).
+
+    Each model stores its timecard list under a different key and extracts it
+    with a different function, so the key travels with the rows rather than
+    being guessed at by the caller.
 
     Used to backfill clock times and hourly rates onto days that were
     finalized before those were stored. Deliberately narrower than
@@ -472,8 +476,23 @@ def refresh_labor_shifts(conn, client, venue, business_day: date) -> list[dict]:
         " WHERE l.venue_id = ?",
         (venue["id"],),
     ).fetchall()
-    labor = extract_timecards_poq(
-        timecards, {r["tmid"]: dict(r) for r in emp_rows}, venue["timezone"],
-        Decimal("0"), settings_store.poq_job_roles(settings),
+    emp_by_tmid = {r["tmid"]: dict(r) for r in emp_rows}
+    model = venue["tip_model"]
+    if model == "POINTS_HOURS":
+        labor = extract_timecards_poq(
+            timecards, emp_by_tmid, venue["timezone"],
+            Decimal("0"), settings_store.poq_job_roles(settings),
+        )
+        return "shifts", labor["shifts"]
+    if model == "PERCENT_TIPOUT":
+        return "timecards", extract_lf_timecards(timecards, emp_by_tmid)["timecards"]
+    # the SAME arguments the day's pull uses — without the job map every
+    # title reads as unmapped and the extractor returns nothing at all
+    labor = extract_timecards(
+        timecards, emp_by_tmid, business_day,
+        settings_store.windows_by_weekday(settings), venue["timezone"],
+        settings_store.rounding_increment(settings),
+        job_roles=settings_store.tl_job_roles(settings),
+        door_weight=settings_store.tl_door_weight(settings),
     )
-    return labor["shifts"]
+    return "timecards", labor["timecards"]

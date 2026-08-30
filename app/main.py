@@ -1485,9 +1485,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         stored pull: inputs are untouched, snapshots are untouched, so no
         finalized payout can change. Safe on finalized days by construction.
         """
-        if venue["tip_model"] != "POINTS_HOURS":
-            raise HTTPException(
-                422, "labor refresh is only available for points-and-hours venues")
         start, end = period_for_scheme(parse_date(anchor),
                                        resolve_scheme(venue, scheme))
         client = get_square_client(venue)
@@ -1498,7 +1495,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 skipped.append(d.isoformat())      # never pulled; nothing to enrich
                 continue
             try:
-                shifts = sync.refresh_labor_shifts(conn, client, venue, d)
+                raw_key, shifts = sync.refresh_labor_shifts(conn, client, venue, d)
             except SquareError as exc:
                 raise HTTPException(502, f"{d}: {exc}")
             except Exception as exc:
@@ -1508,8 +1505,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             record = json.loads(row["square_json"])
             raw = record.setdefault("raw", {})
-            before = raw.get("shifts") or []
-            raw["shifts"] = shifts
+            before = raw.get(raw_key) or []
+            raw[raw_key] = shifts
             record["labor_refreshed_at"] = utcnow()
             conn.execute(
                 "UPDATE day SET square_json = ?, updated_at = ? WHERE id = ?",
@@ -1897,6 +1894,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # "nearest round number (ending in zero)": 507.39 -> 510, 500 -> 500
         return -(-cents // 1000) * 1000
 
+    def payroll_tips(s: dict) -> int:
+        """Everything a venue pays out on the paycheck's TIPS line.
+
+        Each model fills different keys — the points model has an event
+        payout, the hourly pool pays the kitchen its food-sales share — but
+        payroll asks a single question, so they are summed here rather than
+        branched on at every call site. Auto-gratuity is deliberately absent:
+        it is wages and has its own line.
+        """
+        return (s.get("tips_cents", 0) + s.get("event_cents", 0)
+                + s.get("boh_cents", 0))
+
     def labor_hours_for(conn, venue, start: date, end: date):
         """Worked and overtime hours for a period, for RECONCILIATION ONLY.
 
@@ -1927,8 +1936,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         day_hours, unknown = [], []
         for r in rows:
-            shifts = ((json.loads(r["square_json"]).get("raw") or {}).get("shifts", [])
-                      if r["square_json"] else [])
+            # Each model names its stored timecard list differently — the
+            # points model calls them shifts, the other two timecards — but
+            # every one of them carries the same clock times and rate.
+            raw = (json.loads(r["square_json"]).get("raw") or {}) if r["square_json"] else {}
+            shifts = raw.get("shifts") or raw.get("timecards") or []
             timed = [sh for sh in shifts
                      if sh.get("start_at") and sh.get("end_at")]
             # A day that exists but carries no clock times cannot be reconciled:
@@ -2181,6 +2193,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             totals["excluded_hours"] = round(excluded_hours, 2)
             totals["credited_hours"] = round(
                 sum(s_["hours"] for s_ in staff.values()), 2)
+
+        # Paid hours, overtime, wages and the payroll sheet are the same job at
+        # every venue — a timecard is a timecard whatever the tip policy is —
+        # so this runs for all three models (owner 2026-08-30).
+        if True:  # noqa: SIM103 — kept as a block so the diff stays readable
             # from the clock times: the point-of-sale's own labor figures
             labor, per_emp = labor_hours_for(conn, venue, start, end)
             totals.update(labor.as_dict())
@@ -2191,8 +2208,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                   "regular_hours": None, "wages_cents": None})
                 s_["gross_pay_cents"] = (
                     None if lab is None else
-                    lab["wages_cents"] + s_["tips_cents"]
-                    + s_["event_cents"] + s_["gratuity_cents"])
+                    lab["wages_cents"] + payroll_tips(s_) + s_["gratuity_cents"])
             # Payroll covers everyone who worked, which is NOT everyone who
             # earned: a manager's shift takes no tip share but still draws
             # wages, and leaving them off the sheet would under-pay a real
@@ -2239,16 +2255,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for eid, emp in emps.items():
                 if not emp["active"] and eid not in per_emp and eid not in staff:
                     continue
+                # 1099 contract labour is paid directly; importing them into
+                # payroll pays them a second time
+                if emp.get("is_contractor"):
+                    continue
                 if not emp.get("in_payroll", True):
                     s_ = staff.get(eid, {})
-                    earned = (s_.get("tips_cents", 0) + s_.get("event_cents", 0)
-                              + s_.get("gratuity_cents", 0))
+                    earned = payroll_tips(s_) + s_.get("gratuity_cents", 0)
                     if earned or eid in per_emp:
                         off_payroll_with_pay.append(emp["display_name"])
                     continue
                 lab = per_emp.get(eid)
                 s_ = staff.get(eid, {})
-                tips = s_.get("tips_cents", 0) + s_.get("event_cents", 0)
+                tips = payroll_tips(s_)
                 grat = s_.get("gratuity_cents", 0)
                 wages = lab["wages_cents"] if lab else 0
                 sal = None if lab else salary_for(eid)

@@ -1006,11 +1006,17 @@ class TestLaborBackfill:
         assert r.json()["updated"] == []
         assert len(r.json()["skipped"]) > 0
 
-    def test_other_tip_models_are_refused(self, client):
+    def test_every_venue_can_fetch_timecards(self, client):
+        """A timecard is a timecard whatever the tip policy is, so the
+        backfill is no longer points-only (owner 2026-08-30). Tavern Law has
+        no Square credentials in this fixture, so it gets as far as needing
+        them — which proves the model gate is gone; the old 422 here meant
+        'wrong tip model' and would have fired before that."""
         v = {x["slug"]: x for x in client.get("/api/venues").json()}
         r = client.post("/api/periods/2027-01-05/refresh-labor",
                         headers={"X-Venue-Id": str(v["tavern-law"]["id"])})
         assert r.status_code == 422
+        assert "Square is not configured" in r.json()["detail"]
 
     def test_the_export_screen_always_offers_it(self):
         """A button that only exists in the broken case is a button nobody

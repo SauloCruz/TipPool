@@ -2259,6 +2259,15 @@ function poolTiles(t, model, missingDays = []) {
           : "every hour earned a share"]]
     : [[t.total_tips_cents, "Total tips"], [t.boh_allocation_cents, "Kitchen share"],
        [t.foh_pool_cents, "FOH pool"], [t.auto_gratuity_cents, "Auto-gratuity"]];
+  // Paid hours come off the timecards, not the tip policy, so every venue
+  // gets the tile — but only once the clock times are actually stored.
+  if (model !== "POINTS_HOURS" && t.paid_hours !== undefined) {
+    spec.push([null, "Paid hours",
+      (t.hours_unknown_dates || []).length ? "—" : hrs(t.paid_hours),
+      (t.hours_unknown_dates || []).length
+        ? `needs re-pull: ${t.hours_unknown_dates.join(", ")}`
+        : `${hrs(t.regular_hours)} regular · ${hrs(t.overtime_hours)} overtime`]);
+  }
   return el("div", { class: "pools" },
     ...spec.map(([v, k, shown, sub]) => el("div", { class: "pool" },
       el("div", { class: "v" }, shown !== undefined ? shown : fmt(v || 0)),
@@ -2658,7 +2667,7 @@ async function renderExport(anchorArg) {
   // corrected in Square after a day was finalized, and a button that only
   // exists in the broken case is a button nobody can find.
   let refreshBtn = null;
-  if (p.model === "POINTS_HOURS") {
+  {
     const miss = p.totals.hours_unknown_dates || [];
     refreshBtn = el("button", { class: "ghost" }, "\u27F3 Fetch timecard data");
     refreshBtn.addEventListener("click", async () => {
@@ -2687,15 +2696,15 @@ async function renderExport(anchorArg) {
           + "gratuity and every finalized payout stay exactly as they are.")));
     }
   }
+  // Payroll entry and the timecard backfill are venue-agnostic: every venue
+  // runs payroll off the same timecards, whatever its tip policy is.
   const rowBtns = [dl, printSummaryBtn, stubsBtn];
-  if (p.model === "POINTS_HOURS") {
-    const payrollBtn = el("button", { class: "ghost" }, "\u{1F5A8} Payroll entry sheet");
-    payrollBtn.addEventListener("click", () => {
-      location.hash = `#/print-payroll/${p.start}`;
-    });
-    rowBtns.splice(2, 0, payrollBtn);
-    if (refreshBtn) rowBtns.push(refreshBtn);
-  }
+  const payrollBtn = el("button", { class: "ghost" }, "\u{1F5A8} Payroll entry sheet");
+  payrollBtn.addEventListener("click", () => {
+    location.hash = `#/print-payroll/${p.start}`;
+  });
+  rowBtns.splice(2, 0, payrollBtn);
+  if (refreshBtn) rowBtns.push(refreshBtn);
   if (p.model === "PERCENT_TIPOUT" && p.scheme === "monthly") {
     const f4070Btn = el("button", { class: "ghost" }, "🖨 Form 4070 (per employee)");
     f4070Btn.addEventListener("click", () => {

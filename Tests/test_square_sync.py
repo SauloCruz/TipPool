@@ -705,3 +705,47 @@ class TestEventPullTavernLaw:
                    json={"deposit_ids": ["ODEP:d1"]})
         body = self._pull_event_day(client, fake).json()
         assert body["inputs"]["event_tips_cents"] == 5580 + 56924
+
+
+class TestTimecardsCarryClockTimesEverywhere:
+    """Paid hours, overtime and wages need clock times and the job's rate.
+    The points model stored them first; the other two now do too, so every
+    venue can run the payroll sheet and the timecard backfill."""
+
+    def test_tavern_law_timecards_carry_times_and_rate(self):
+        from app.square_extract import extract_timecards
+        from engine import TippableWindow
+        from datetime import date
+        from decimal import Decimal
+        emp = {"TM1": {"id": 7, "display_name": "Ana", "pool_role": "FOH"}}
+        tcs = [{"team_member_id": "TM1", "start_at": "2026-08-20T17:00:00-07:00",
+                "end_at": "2026-08-20T23:30:00-07:00",
+                "wage": {"title": "Bartender",
+                         "hourly_rate": {"amount": 2130, "currency": "USD"}},
+                "declared_cash_tip_money": {"amount": 0, "currency": "USD"}}]
+        out = extract_timecards(
+            tcs, emp, date(2026, 8, 20),
+            {i: TippableWindow() for i in range(7)},
+            "America/Los_Angeles", Decimal("0.05"),
+            job_roles={"Bartender": "FOH"})
+        card = out["timecards"][0]
+        assert card["start_at"] == "2026-08-20T17:00:00-07:00"
+        assert card["end_at"] == "2026-08-20T23:30:00-07:00"
+        assert card["rate_cents"] == 2130
+
+    def test_la_fontana_timecards_carry_times_and_rate(self):
+        from app.square_extract import extract_lf_timecards
+        emp = {"TM1": {"id": 9, "display_name": "Bo", "pool_role": "SERVER"}}
+        tcs = [{"team_member_id": "TM1", "start_at": "2026-08-20T16:00:00-07:00",
+                "end_at": "2026-08-20T22:00:00-07:00",
+                "wage": {"title": "Server",
+                         "hourly_rate": {"amount": 1800, "currency": "USD"}},
+                "declared_cash_tip_money": {"amount": 0, "currency": "USD"}}]
+        card = extract_lf_timecards(tcs, emp)["timecards"][0]
+        assert card["start_at"] and card["end_at"]
+        assert card["rate_cents"] == 1800
+
+    def test_a_missing_rate_is_none_not_a_guess(self):
+        from app.square_extract import _rate_cents
+        assert _rate_cents({"wage": {"title": "Host"}}) is None
+        assert _rate_cents({}) is None
