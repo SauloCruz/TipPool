@@ -2248,6 +2248,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return None
 
             payroll = []
+            # Contract labour is paid directly, so it never reaches this
+            # sheet — but the money is real and the total is read against the
+            # venue's own reports, so name it rather than let it vanish.
+            contractor_pay = {"names": [], "tips_cents": 0, "gratuity_cents": 0}
             # Someone marked off payroll who nonetheless earned is worth
             # saying out loud — dropping their row silently would lose real
             # money without anyone noticing.
@@ -2256,8 +2260,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if not emp["active"] and eid not in per_emp and eid not in staff:
                     continue
                 # 1099 contract labour is paid directly; importing them into
-                # payroll pays them a second time
+                # payroll pays them a second time. Their share is REPORTED
+                # below though — the sheet's totals cannot tie out against the
+                # venue's own figures without saying what was held back.
                 if emp.get("is_contractor"):
+                    s_ = staff.get(eid, {})
+                    if payroll_tips(s_) or s_.get("gratuity_cents"):
+                        contractor_pay["names"].append(emp["display_name"])
+                        contractor_pay["tips_cents"] += payroll_tips(s_)
+                        contractor_pay["gratuity_cents"] += s_.get("gratuity_cents", 0)
                     continue
                 if not emp.get("in_payroll", True):
                     s_ = staff.get(eid, {})
@@ -2295,6 +2306,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 })
             payroll.sort(key=lambda r: r["name"])
             totals["off_payroll_with_pay"] = sorted(off_payroll_with_pay)
+            contractor_pay["names"].sort()
+            totals["contractor_pay"] = contractor_pay
 
         return {
             "start": start.isoformat(), "end": end.isoformat(),

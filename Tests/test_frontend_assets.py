@@ -376,3 +376,26 @@ class TestExportFeaturesAreVenueAgnostic:
         assert 'model !== "POINTS_HOURS" && t.paid_hours !== undefined' in tiles
         # and still refuses to show a number it cannot stand behind
         assert tiles.count("needs re-pull") >= 2
+
+
+class TestPayrollSheetExplainsItsOwnTotal:
+    """Contract labour is paid directly and never reaches the payroll sheet,
+    so the sheet's totals are deliberately short of the venue's own tip and
+    service-charge reports. Found at Tavern Law 2026-08-16..31: the period
+    tile read $630.18 of auto-gratuity, matching Square exactly, while the
+    payroll sheet read $621.66 — the $8.52 difference being one contractor's
+    share, with nothing on the page to say so."""
+
+    FN = APP_JS.split("async function renderPrintPayroll(")[1].split(
+        "\n/* ---------- ")[0]
+
+    def test_contractor_pay_is_named_not_silently_dropped(self):
+        assert "contractor_pay" in self.FN
+        assert "paid directly and is not on this sheet" in self.FN
+        # both figures, so the reader can add them back and reconcile
+        assert "contractor_pay.tips_cents" in self.FN
+        assert "contractor_pay.gratuity_cents" in self.FN
+        assert "contractor_pay.names.join" in self.FN
+
+    def test_the_note_only_appears_when_there_is_something_to_say(self):
+        assert "(p.totals.contractor_pay || {}).names || []).length" in self.FN

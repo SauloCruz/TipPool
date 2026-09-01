@@ -390,3 +390,21 @@ class TestHoursRoundUp:
         assert sum(p["tips_cents"] for p in out["foh"]) == out["totals"]["foh_pool_cents"]
         assert (sum(p["gratuity_cents"] for p in out["foh"])
                 == out["totals"]["auto_gratuity_cents"])
+
+
+class TestContractorPayIsReported:
+    """A contractor's share is held off the payroll sheet on purpose, but the
+    total has to be explicable, so the period reports what was held back."""
+
+    def test_totals_carry_contractor_pay(self, client):
+        v = {x["slug"]: x for x in client.get("/api/venues").json()}
+        H = {"X-Venue-Id": str(v["tavern-law"]["id"])}
+        t = client.get("/api/periods/2026-07-01/export", headers=H).json()["totals"]
+        cp = t.get("contractor_pay")
+        assert cp is not None
+        assert set(cp) == {"names", "tips_cents", "gratuity_cents"}
+        # payroll gratuity + contractor gratuity accounts for the whole pool
+        p = client.get("/api/periods/2026-07-01/export", headers=H).json()
+        sheet = sum(r["gratuity_cents"] for r in p["payroll"])
+        assert sheet + cp["gratuity_cents"] == sum(
+            e["gratuity_cents"] for e in p["employees"])

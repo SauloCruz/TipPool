@@ -3130,6 +3130,15 @@ async function renderPrintPayroll(anchorArg) {
         ? `Not shown, marked as not on payroll but had hours or earnings this `
           + `period: ${p.totals.off_payroll_with_pay.join(", ")}. `
         : "")
+      // Without this the totals below simply will not match the venue's own
+      // tip and service-charge reports, and nothing on the page says why.
+      + (((p.totals.contractor_pay || {}).names || []).length
+        ? `Contract labour is paid directly and is not on this sheet, so the `
+          + `totals below are short by their share: `
+          + `${fmt(p.totals.contractor_pay.tips_cents)} of tips and `
+          + `${fmt(p.totals.contractor_pay.gratuity_cents)} of gratuity to `
+          + `${p.totals.contractor_pay.names.join(", ")}. `
+        : "")
       + (rows.some((r) => r.no_timecards)
         ? "\u2021 No timecards this period — salaried, or did not work. There "
           + "are no hours or wages to report for them; a salaried figure comes "
