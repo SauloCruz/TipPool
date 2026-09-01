@@ -749,3 +749,54 @@ class TestTimecardsCarryClockTimesEverywhere:
         from app.square_extract import _rate_cents
         assert _rate_cents({"wage": {"title": "Host"}}) is None
         assert _rate_cents({}) is None
+
+
+class TestNetSalesCannotBeStrandedByAnEdit:
+    """Net sales is reporting only (it is the average tip rate's denominator)
+    and no human ever types it. It was being dropped by the Poquitos day
+    screen's save, which zeroed it; the zero then differed from the pull, the
+    merge read that as a manager override, and no amount of re-pulling could
+    put it back (found on 2026-08-29, $14,673.10 stranded)."""
+
+    def test_a_pull_always_wins_for_net_sales(self):
+        from app.sync import merge_pull_into_inputs, SQUARE_FIELDS_BY_MODEL
+        F = SQUARE_FIELDS_BY_MODEL["POINTS_HOURS"]
+        old_pull = {"values": {"net_sales_cents": 1467310}}
+        new_pull = {"values": {"net_sales_cents": 1467310}, "issues": []}
+        # the stranded state: input says 0, the last pull said 14,673.10
+        merged = merge_pull_into_inputs({"net_sales_cents": 0}, old_pull, new_pull, F)
+        assert merged["net_sales_cents"] == 1467310
+
+    def test_a_real_override_is_still_respected(self):
+        """The rule itself is right for money a manager may correct — only
+        net sales is exempt, because nobody enters it by hand."""
+        from app.sync import merge_pull_into_inputs, SQUARE_FIELDS_BY_MODEL
+        F = SQUARE_FIELDS_BY_MODEL["POINTS_HOURS"]
+        old_pull = {"values": {"cash_tips_cents": 5000}}
+        new_pull = {"values": {"cash_tips_cents": 9000}, "issues": []}
+        merged = merge_pull_into_inputs({"cash_tips_cents": 7500}, old_pull, new_pull, F)
+        assert merged["cash_tips_cents"] == 7500      # the manager's figure
+
+    def test_the_day_screen_round_trips_every_pulled_field(self):
+        """Whatever the screen does not show, it must still send back."""
+        import re
+        from pathlib import Path
+        from app.sync import SQUARE_FIELDS_BY_MODEL
+        js = (Path(__file__).parent.parent / "static" / "app.js").read_text()
+        for fn, model in (("function renderDay(", "POOL_HOURS"),
+                          ("function renderDayLF(", "PERCENT_TIPOUT"),
+                          ("function renderDayPoq(", "POINTS_HOURS")):
+            i = js.index(fn)
+            nxt = re.search(r"\n(?:async )?function |\n/\* -", js[i + 20:])
+            blk = js[i:i + 20 + nxt.start()]
+            k = blk.find("collectInputs()")
+            body = blk[k:k + 3000]
+            # Tavern Law sends its money fields through a loop over
+            # STEPPER_MONEY, so those names live in that table rather than in
+            # collectInputs itself — count them as covered.
+            looped = re.search(r"const STEPPER_MONEY = \[(.*?)\];", js, re.S).group(1)
+            if "STEPPER_MONEY" not in body:
+                looped = ""
+            for field in SQUARE_FIELDS_BY_MODEL[model]:
+                assert field in body or field in looped, \
+                    f"{model}: {field} dropped on save"

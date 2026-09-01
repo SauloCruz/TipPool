@@ -67,7 +67,10 @@ def blocked_fields(square: dict | None) -> set[str]:
 # Fields the pull derives and the manager never edits directly. They carry no
 # override protection — a re-pull always replaces them — and they are not
 # audited as overrides, because nobody chose them.
-DERIVED_FIELDS = frozenset({"foh_role_weights"})
+# Never hand-typed, so a pull always wins: treating one of these as a manager
+# override freezes a stale value that no later pull can correct. `net_sales`
+# is reporting only (the average tip rate) and never enters a payout.
+DERIVED_FIELDS = frozenset({"foh_role_weights", "net_sales_cents"})
 
 # Money a manager may have typed before Square could see it. On the FIRST pull
 # a non-zero manual figure is kept rather than overwritten: event tips in

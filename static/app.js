@@ -1638,6 +1638,11 @@ async function renderDayPoq(dateArg) {
       auto_gratuity_cents: centsFromInput(moneyEls.auto_gratuity_cents),
       event_service_charge_cents: centsFromInput(moneyEls.event_service_charge_cents),
       event_tips_cents: centsFromInput(moneyEls.event_tips_cents),
+      // Reporting-only figures the screen never shows still have to be sent
+      // back: a save that omits one zeroes it, and once the stored value
+      // differs from the pull the merge reads it as a manager override and
+      // no later pull can restore it.
+      net_sales_cents: inputs.net_sales_cents || 0,
       event_card_cents: inputs.event_card_cents || 0,
       event_start: inputs.event_start || null,
       event_end: inputs.event_end || null,
