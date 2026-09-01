@@ -172,13 +172,17 @@ def extract_event_tips(orders: list[dict], payments: list[dict],
                        event_order_ids: Iterable[str],
                        grat_cfg: dict | None = None,
                        house_names: Iterable[str] = ()) -> dict:
-    """Tip money riding on an event ticket: card tips and gratuity service
-    charges on any order that carried an event line item.
+    """Card tips riding on an event ticket.
 
-    Owner ruling 2026-08-29 — "any other Event Tip should roll into Event
-    Tips". The 8/22 event's second ticket carried a $55.80 auto-gratuity that
-    would otherwise have been split across every bartender on the floor
-    instead of the crew who worked the party. Refunds net off the same way
+    A gratuity SERVICE CHARGE on an event ticket is deliberately NOT counted
+    here (owner 2026-09-01, superseding the 2026-08-29 ruling that rolled it
+    into event tips). A service charge is wages whoever rang it, so it stays
+    on the auto-gratuity line where the tax treatment is right and where it
+    reconciles against the point-of-sale's own service-charge report. Only a
+    voluntary card tip on the ticket is event tip money.
+
+    The charge is still reported per order so the day can show it; it is
+    simply counted in auto-gratuity instead. Refunds net off the same way
     they do everywhere else: the refund eats the ordinary part of the check
     first, so only the excess reaches the tip.
     """
@@ -203,8 +207,9 @@ def extract_event_tips(orders: list[dict], payments: list[dict],
         sc = sum(_charge_cents(c) for c in order.get("service_charges", [])
                  if _is_staff_gratuity(c, want_id, want_name, house_names))
         tip = sum(_amount(p.get("tip_money")) for p in pays)
-        pool = sc + tip
-        if not pool:
+        # the charge is reported but NOT pooled here — it is auto-gratuity
+        pool = tip
+        if not pool and not sc:
             continue
         back = min(pool, max(0, refunded - (paid - pool))) if refunded else 0
         total += pool - back

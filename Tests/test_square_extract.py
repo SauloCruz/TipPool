@@ -598,15 +598,20 @@ class TestEventItems:
 class TestEventTips:
     CFG = {"catalog_object_id": None, "name_contains": "gratuity"}
 
-    def test_gratuity_on_an_event_ticket_is_event_money(self):
-        # the real 8/22: a $75 event-food ticket carrying $55.80 of gratuity
+    def test_gratuity_on_an_event_ticket_is_NOT_event_money(self):
+        """Owner 2026-09-01, superseding 2026-08-29: a gratuity service
+        charge is wages wherever it was rung, so it stays on the
+        auto-gratuity line rather than becoming event tip money. The real
+        8/22: a $75 event-food ticket carrying $55.80 of gratuity."""
         orders = [{"id": "O2", "line_items": [_li("V_EVFOOD", 7500)],
                    "service_charges": [{"type": "AUTO_GRATUITY",
                                         "applied_money": money(5580)}]}]
         pays = [{"order_id": "O2", "status": "COMPLETED", "card_details": {},
                  "tip_money": money(0), "total_money": money(37012)}]
         out = extract_event_tips(orders, pays, ["O2"], self.CFG)
-        assert out["event_tips_cents"] == 5580
+        assert out["event_tips_cents"] == 0
+        # still reported, so the day can show where the charge went
+        assert out["lines"][0]["service_charge_cents"] == 5580
 
     def test_card_tip_on_an_event_ticket_is_event_money(self):
         orders = [{"id": "O2", "line_items": [_li("V_EVFOOD", 7500)]}]

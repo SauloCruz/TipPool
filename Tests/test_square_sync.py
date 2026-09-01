@@ -640,9 +640,13 @@ class TestEventPullTavernLaw:
         inp = body["inputs"]
         assert inp["food_sales_cents"] == 9000            # the burger only
         assert inp["event_food_sales_cents"] == 51500     # 440 + 75, both lines
-        assert inp["event_tips_cents"] == 5580            # the event's gratuity
-        assert inp["auto_gratuity_cents"] == 2660         # the bar's, not the party's
-        assert inp["credit_tips_cents"] == 4000           # event ticket excluded
+        # Owner 2026-09-01, superseding 2026-08-29: the event ticket's
+        # gratuity SERVICE CHARGE is wages, so it stays on the auto-gratuity
+        # line — both for the tax treatment and so that line still
+        # reconciles against the point-of-sale's service-charge report.
+        assert inp["event_tips_cents"] == 0               # no card tip on it
+        assert inp["auto_gratuity_cents"] == 2660 + 5580  # bar's AND the party's
+        assert inp["credit_tips_cents"] == 4000           # event card tips still excluded
         ev = body["square"]["event"]
         assert ev["other_cents"] == 157500                # beverage package
         assert ev["other_lines"][0]["item"] == "Event Beverage Package"
@@ -665,7 +669,7 @@ class TestEventPullTavernLaw:
                        json={"deposit_ids": ["ODEP:d1"]})
         assert r.status_code == 200, r.text
         # ticket gratuity + the deposit, and nothing typed by hand
-        assert r.json()["inputs"]["event_tips_cents"] == 5580 + 56924
+        assert r.json()["inputs"]["event_tips_cents"] == 56924   # deposit only
         assert r.json()["inputs"]["event_deposit_ids"] == ["ODEP:d1"]
 
     def test_a_deposit_cannot_be_paid_to_two_events(self, client, fake, roster):
@@ -692,7 +696,7 @@ class TestEventPullTavernLaw:
                    json={"deposit_ids": ["ODEP:d1"]})
         r = client.put(f"/api/days/{self.EV_DAY}/event-deposits",
                        json={"deposit_ids": []})
-        assert r.json()["inputs"]["event_tips_cents"] == 5580
+        assert r.json()["inputs"]["event_tips_cents"] == 0     # deposit detached
         listing = client.get(f"/api/days/{self.EV_DAY}/event-deposits").json()
         assert listing["deposits"][0]["attached_to"] is None
 
@@ -704,7 +708,7 @@ class TestEventPullTavernLaw:
         client.put(f"/api/days/{self.EV_DAY}/event-deposits",
                    json={"deposit_ids": ["ODEP:d1"]})
         body = self._pull_event_day(client, fake).json()
-        assert body["inputs"]["event_tips_cents"] == 5580 + 56924
+        assert body["inputs"]["event_tips_cents"] == 56924   # deposit survives
 
 
 class TestTimecardsCarryClockTimesEverywhere:

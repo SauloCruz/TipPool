@@ -155,8 +155,13 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
                                  settings["gratuity_service_charge"],
                                  settings["house_service_charges"])
     tips = extract_credit_tips(payments, exclude_order_ids=ev_ids)
+    # An event ticket's gratuity service charge is NOT excluded (owner
+    # 2026-09-01): a service charge is wages wherever it was rung, so it
+    # belongs on the auto-gratuity line and keeps that line reconcilable
+    # against the point-of-sale. Only the ticket's card TIPS move to the
+    # event, which is why credit tips above still exclude these orders.
     grat = extract_auto_gratuity(orders, settings["gratuity_service_charge"],
-                                 payments, exclude_order_ids=ev_ids,
+                                 payments,
                                  house_names=settings["house_service_charges"])
     labor = extract_timecards(
         timecards, emp_by_tmid, business_day,
