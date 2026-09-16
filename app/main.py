@@ -1941,8 +1941,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # every one of them carries the same clock times and rate.
             raw = (json.loads(r["square_json"]).get("raw") or {}) if r["square_json"] else {}
             shifts = raw.get("shifts") or raw.get("timecards") or []
+            # A shift stored before unpaid breaks were recorded cannot say
+            # whether it had one, so its paid hours may be overstated. Treat
+            # the day as unknown until its timecards are fetched again rather
+            # than report a figure that silently includes break time.
             timed = [sh for sh in shifts
-                     if sh.get("start_at") and sh.get("end_at")]
+                     if sh.get("start_at") and sh.get("end_at")
+                     and "unpaid_breaks" in sh]
             # A day that exists but carries no clock times cannot be reconciled:
             # either it was hand-entered, or it was pulled before clock times
             # were stored. A day with a pull and genuinely no timecards (venue
@@ -1955,7 +1960,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for sh in timed:
                 for d, h in engine.split_at_midnight(
                         datetime.fromisoformat(sh["start_at"]),
-                        datetime.fromisoformat(sh["end_at"]), tz):
+                        datetime.fromisoformat(sh["end_at"]), tz,
+                        breaks=[(datetime.fromisoformat(b0),
+                                 datetime.fromisoformat(b1))
+                                for b0, b1 in sh["unpaid_breaks"]]):
                     day_hours.append((sh["employee_id"], d, h,
                                       sh.get("rate_cents") or 0))
         worked = sum(h for _, d, h, _r in day_hours if start <= d <= end)

@@ -60,17 +60,25 @@ class LaborHours:
         }
 
 
-def split_at_midnight(start: datetime, end: datetime,
-                      tz: ZoneInfo) -> list[tuple[date, float]]:
-    """Break one shift into (local calendar day, hours) pieces.
+def split_at_midnight(start: datetime, end: datetime, tz: ZoneInfo,
+                      breaks=()) -> list[tuple[date, float]]:
+    """Break one shift into (local calendar day, PAID hours) pieces.
 
     A shift entirely inside one day returns a single piece; one crossing
     midnight returns a piece per day it touches. Returns nothing for a
     zero-length or reversed interval rather than inventing negative hours.
+
+    `breaks` are the shift's UNPAID breaks as (start, end) datetimes; each is
+    subtracted from whichever day pieces it overlaps. Paid hours exclude
+    them — Square's own labor report does, and so does the tip pool — so
+    leaving them in overstated paid hours, overtime and wages for anyone who
+    took one (found 2026-09-16: 21.82 h reported against Square's 18.05).
     """
     start, end = start.astimezone(tz), end.astimezone(tz)
     if end <= start:
         return []
+    brk = [(b0.timestamp(), b1.timestamp()) for b0, b1 in breaks
+           if b1 > b0]
 
     def midnight(d: date) -> datetime:
         return datetime.combine(d, datetime.min.time(), tz)
@@ -84,7 +92,10 @@ def split_at_midnight(start: datetime, end: datetime,
             # Subtracting two aware datetimes that share a tzinfo gives the
             # WALL-CLOCK difference, so a fall-back day would come out 24 h
             # instead of 25. Difference the absolute timestamps instead.
-            pieces.append((d, (hi.timestamp() - lo.timestamp()) / 3600))
+            secs = hi.timestamp() - lo.timestamp()
+            for b0, b1 in brk:
+                secs -= max(0.0, min(b1, hi.timestamp()) - max(b0, lo.timestamp()))
+            pieces.append((d, max(0.0, secs) / 3600))
         d += timedelta(days=1)
     return pieces
 

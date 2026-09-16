@@ -632,6 +632,7 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
                           "invalid_interval": True,
                           "raw_hours": 0.0, "tippable_hours": 0.0,
                           "start_at": tc["start_at"], "end_at": tc["end_at"],
+                           "unpaid_breaks": _unpaid_breaks(tc),
                           "rate_cents": _rate_cents(tc)})
             continue
         breaks = [
@@ -663,6 +664,7 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
                       # split a shift at midnight and price paid hours the way
                       # payroll does — none of this touches the tip pool
                       "start_at": tc["start_at"], "end_at": tc["end_at"],
+                           "unpaid_breaks": _unpaid_breaks(tc),
                       "rate_cents": _rate_cents(tc)})
 
     # One round-up per person per day (owner 2026-07-29: credited hours step
@@ -726,6 +728,16 @@ _TITLE_ROLE_HINTS = (
     ("host", "HOST"),
     ("cook", "BOH"), ("chef", "BOH"), ("kitchen", "BOH"), ("dish", "BOH"),
 )
+
+
+def _unpaid_breaks(tc: dict) -> list[list[str]]:
+    """The timecard's UNPAID breaks as [start, end] pairs, stored beside the
+    clock times so paid hours can subtract them. Without this a 10:02-22:13
+    shift with a two-hour unpaid break reports 12.18 paid hours instead of
+    10.22. A break with no end (still on it) has no length yet and is left
+    out, the same way the tip pool treats it."""
+    return [[b["start_at"], b["end_at"]] for b in tc.get("breaks") or ()
+            if not b.get("is_paid") and b.get("end_at")]
 
 
 def _rate_cents(tc: dict) -> int | None:
@@ -857,6 +869,7 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
                           "invalid_interval": True, "worked_hours": 0.0,
                           "job_title": title,
                           "start_at": tc["start_at"], "end_at": tc["end_at"],
+                           "unpaid_breaks": _unpaid_breaks(tc),
                           "rate_cents": _rate_cents(tc)})
             continue
         seconds = end - start
@@ -873,6 +886,7 @@ def extract_lf_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict]) ->
                       "worked_hours": worked, "job_title": title,
                       # as above: reporting only, never part of a payout
                       "start_at": tc["start_at"], "end_at": tc["end_at"],
+                           "unpaid_breaks": _unpaid_breaks(tc),
                       "rate_cents": _rate_cents(tc)})
     issues = []
     if unmapped:
@@ -970,7 +984,8 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
             shifts.append({"employee_id": emp["id"], "name": emp["display_name"],
                            "role": role, "job_title": title, "hours": 0.0,
                            "declared_cents": declared, "invalid_interval": True,
-                           "start_at": tc["start_at"], "end_at": tc["end_at"]})
+                           "start_at": tc["start_at"], "end_at": tc["end_at"],
+                           "unpaid_breaks": _unpaid_breaks(tc)})
             continue
 
         seconds = t_out.timestamp() - t_in.timestamp()
@@ -994,6 +1009,7 @@ def extract_timecards_poq(timecards: list[dict], emp_by_tmid: dict[str, dict],
                        # the one in force for THIS job, so a person who
                        # bartends and hosts is costed correctly for each
                        "start_at": tc["start_at"], "end_at": tc["end_at"],
+                           "unpaid_breaks": _unpaid_breaks(tc),
                        "rate_cents": ((tc.get("wage") or {}).get("hourly_rate")
                                       or {}).get("amount")})
 

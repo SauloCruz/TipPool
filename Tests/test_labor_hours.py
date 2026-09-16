@@ -225,3 +225,38 @@ class TestStraightTimeUsesReportedHours:
         got = period_labor(entries, self.P0, self.P1)["ana"]
         assert got["overtime_hours"] == 0.0
         assert got["wages_cents"] == 44624       # unchanged from the pay run
+
+
+class TestUnpaidBreaksAreNotPaidHours:
+    """Paid hours exclude unpaid breaks, as Square's labor report and the tip
+    pool both do. Found 2026-09-16 at Poquitos: Camilo Posse's 9/05 and 9/12
+    shifts carried 1.80 h and 1.97 h unpaid breaks, and the payroll sheet read
+    21.82 h against Square's 18.05."""
+
+    def test_a_real_shift_with_a_break(self):
+        # 9/12: 10:02-22:13 with an unpaid break 16:02-18:00
+        pieces = split_at_midnight(
+            dt("2026-09-12T10:02:00-07:00"), dt("2026-09-12T22:13:00-07:00"), TZ,
+            breaks=[(dt("2026-09-12T16:02:00-07:00"), dt("2026-09-12T18:00:00-07:00"))])
+        assert round(pieces[0][1], 2) == 10.22       # not 12.18
+
+    def test_camilo_reconciles_with_square(self):
+        a = split_at_midnight(
+            dt("2026-09-05T11:48:00-07:00"), dt("2026-09-05T21:26:00-07:00"), TZ,
+            breaks=[(dt("2026-09-05T16:09:00-07:00"), dt("2026-09-05T17:57:00-07:00"))])
+        b = split_at_midnight(
+            dt("2026-09-12T10:02:00-07:00"), dt("2026-09-12T22:13:00-07:00"), TZ,
+            breaks=[(dt("2026-09-12T16:02:00-07:00"), dt("2026-09-12T18:00:00-07:00"))])
+        assert round(sum(h for _, h in a + b), 2) == 18.05
+
+    def test_a_break_across_midnight_comes_off_each_side(self):
+        pieces = dict(split_at_midnight(
+            dt("2026-09-12T20:00:00-07:00"), dt("2026-09-13T02:00:00-07:00"), TZ,
+            breaks=[(dt("2026-09-12T23:30:00-07:00"), dt("2026-09-13T00:30:00-07:00"))]))
+        assert pieces[date(2026, 9, 12)] == pytest.approx(3.5)
+        assert pieces[date(2026, 9, 13)] == pytest.approx(1.5)
+
+    def test_no_breaks_is_unchanged(self):
+        assert split_at_midnight(dt("2026-08-15T17:00:00-07:00"),
+                                 dt("2026-08-15T23:30:00-07:00"), TZ) == \
+            [(date(2026, 8, 15), 6.5)]

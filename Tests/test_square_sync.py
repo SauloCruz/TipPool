@@ -804,3 +804,42 @@ class TestNetSalesCannotBeStrandedByAnEdit:
             for field in SQUARE_FIELDS_BY_MODEL[model]:
                 assert field in body or field in looped, \
                     f"{model}: {field} dropped on save"
+
+
+class TestShiftsRecordUnpaidBreaks:
+    """Every venue's stored timecard carries its unpaid breaks, so paid hours
+    can subtract them; paid breaks and a break still in progress do not."""
+
+    TC = {"team_member_id": "TM1", "start_at": "2026-09-12T10:02:00-07:00",
+          "end_at": "2026-09-12T22:13:00-07:00",
+          "wage": {"title": "Server", "hourly_rate": {"amount": 1800, "currency": "USD"}},
+          "declared_cash_tip_money": {"amount": 0, "currency": "USD"},
+          "breaks": [
+              {"start_at": "2026-09-12T16:02:00-07:00", "end_at": "2026-09-12T18:00:00-07:00",
+               "is_paid": False},
+              {"start_at": "2026-09-12T20:00:00-07:00", "end_at": "2026-09-12T20:10:00-07:00",
+               "is_paid": True},
+              {"start_at": "2026-09-12T21:00:00-07:00", "is_paid": False}]}
+
+    def test_only_closed_unpaid_breaks_are_kept(self):
+        from app.square_extract import _unpaid_breaks
+        assert _unpaid_breaks(self.TC) == [
+            ["2026-09-12T16:02:00-07:00", "2026-09-12T18:00:00-07:00"]]
+
+    def test_la_fontana_stores_them(self):
+        from app.square_extract import extract_lf_timecards
+        emp = {"TM1": {"id": 9, "display_name": "Bo", "pool_role": "SERVER"}}
+        card = extract_lf_timecards([self.TC], emp)["timecards"][0]
+        assert card["unpaid_breaks"] == [
+            ["2026-09-12T16:02:00-07:00", "2026-09-12T18:00:00-07:00"]]
+
+    def test_the_labor_reader_refuses_shifts_stored_without_them(self):
+        """A shift stored before breaks were recorded cannot say whether it
+        had one, so the day reads as needing a re-fetch, never as a figure
+        that might silently include break time."""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "main.py").read_text()
+        fn = src.split("def labor_hours_for(")[1].split("\n    def ")[0]
+        assert '"unpaid_breaks" in sh' in fn
+        assert 'sh["unpaid_breaks"]' in fn
