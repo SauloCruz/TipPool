@@ -170,6 +170,11 @@ DEFAULTS = {
     # weekly_hours, job_title}}
     "square_wage_settings": {},
     "poq_workweek_start": "SUN",
+    # Minutes past midnight the point-of-sale's REPORTING DAY begins, for paid
+    # hours and overtime only (never the tip pool, which has its own
+    # `day_cutoff_minutes`). Must mirror the Square account: Poquitos reports
+    # midnight to midnight (0), Tavern Law 3:00 am to 2:59 am (180).
+    "labor_day_start_minutes": 0,
     "poq_overtime_after": "40",
 }
 

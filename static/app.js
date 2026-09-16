@@ -3861,6 +3861,32 @@ async function renderSettings() {
   }
   view.append(warnCard);
 
+  /* --- paid hours: where the point-of-sale's reporting day begins --- */
+  {
+    const cur = Number(s.labor_day_start_minutes || 0);
+    const sel = el("select", { style: "width:auto" },
+      ...[0, 60, 120, 180, 240, 300, 360].map((m) => el("option",
+        { value: String(m), ...(m === cur ? { selected: "" } : {}) },
+        m === 0 ? "Midnight" : `${m / 60}:00 am`)));
+    sel.addEventListener("change", async () => {
+      try {
+        await api("/api/settings", { method: "PUT",
+          body: { labor_day_start_minutes: Number(sel.value) } });
+        toast("Reporting day saved");
+      } catch (e) { toast(e.message, true); }
+    });
+    view.append(el("div", { class: "card" },
+      el("h2", {}, "Paid hours: reporting day"),
+      el("div", { class: "note" },
+        "Where the Square account's reporting day begins — shown on Square's "
+        + "sales reports as e.g. \"Reporting day (3:00 am – 2:59 am)\". A shift "
+        + "running past midnight but ending before this time counts entirely on "
+        + "the day it started, which decides which pay period its hours land in. "
+        + "Paid hours, overtime and wages only; the tip pool is unaffected."),
+      el("div", { class: "row" },
+        el("span", { class: "hint", style: "flex:1" }, "Reporting day starts at"), sel)));
+  }
+
   /* --- team linking (collapsible; opens itself when links are missing) --- */
   const linkedTmidsPre = new Set(employees.flatMap((e) => e.square_team_member_ids || []));
   const teamAll = s.square_team_cache || [];

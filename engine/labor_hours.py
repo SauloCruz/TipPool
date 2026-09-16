@@ -61,7 +61,8 @@ class LaborHours:
 
 
 def split_at_midnight(start: datetime, end: datetime, tz: ZoneInfo,
-                      breaks=()) -> list[tuple[date, float]]:
+                      breaks=(), day_start_minutes: int = 0
+                      ) -> list[tuple[date, float]]:
     """Break one shift into (local calendar day, PAID hours) pieces.
 
     A shift entirely inside one day returns a single piece; one crossing
@@ -73,6 +74,14 @@ def split_at_midnight(start: datetime, end: datetime, tz: ZoneInfo,
     them — Square's own labor report does, and so does the tip pool — so
     leaving them in overstated paid hours, overtime and wages for anyone who
     took one (found 2026-09-16: 21.82 h reported against Square's 18.05).
+
+    `day_start_minutes` moves the day boundary off midnight to match the
+    point-of-sale account's REPORTING DAY. Square accounts differ: Poquitos
+    reports midnight to midnight and reconciles with 0, while Tavern Law's
+    account runs 3:00 am to 2:59 am, so a 15:59-01:02 closing shift belongs
+    wholly to the day it started (found 2026-09-16: Bree Staab's 8/31 shift
+    put 1.03 h into the wrong pay period). A piece is labelled with the date
+    its reporting day began.
     """
     start, end = start.astimezone(tz), end.astimezone(tz)
     if end <= start:
@@ -80,11 +89,17 @@ def split_at_midnight(start: datetime, end: datetime, tz: ZoneInfo,
     brk = [(b0.timestamp(), b1.timestamp()) for b0, b1 in breaks
            if b1 > b0]
 
+    offset = timedelta(minutes=day_start_minutes)
+
     def midnight(d: date) -> datetime:
-        return datetime.combine(d, datetime.min.time(), tz)
+        # the start of reporting day `d` — local wall clock, so a DST night
+        # still begins at the same printed time
+        return datetime.combine(d, datetime.min.time(), tz) + offset
 
     pieces: list[tuple[date, float]] = []
     d = start.date()
+    if start < midnight(d):          # before the boundary: still yesterday
+        d -= timedelta(days=1)
     while midnight(d) < end:
         lo = max(start, midnight(d))
         hi = min(end, midnight(d + timedelta(days=1)))

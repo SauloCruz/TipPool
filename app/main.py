@@ -258,6 +258,8 @@ class SettingsPatch(BaseModel):
     # POINTS_HOURS overtime, REPORTING ONLY — mirrors the venue's payroll
     # settings so the period report reconciles; never enters a tip payout
     poq_workweek_start: str | None = None
+    # paid hours only: where the point-of-sale's reporting day begins
+    labor_day_start_minutes: int | None = Field(default=None, ge=0, le=360)
     poq_overtime_after: str | None = None
 
     @field_validator("tl_job_roles")
@@ -1931,13 +1933,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tz = ZoneInfo(venue["timezone"])
         week_start = settings_store.poq_workweek_start(settings)
         threshold = float(settings.get("poq_overtime_after") or 40)
+        day_start = int(settings.get("labor_day_start_minutes") or 0)
 
         # back to the first day of the week containing `start`
         lookback = start - timedelta(days=(start.weekday() - week_start) % 7)
         rows = conn.execute(
             "SELECT date, square_json FROM day"
             " WHERE venue_id = ? AND date BETWEEN ? AND ? ORDER BY date",
-            (venue["id"], lookback.isoformat(), end.isoformat()),
+            (venue["id"], lookback.isoformat(),
+             # one day past the end: with a reporting day starting after the
+             # tip pool's cutoff, a 2:30 am punch is stored on the next
+             # business day yet belongs to this period's last day
+             (end + timedelta(days=1)).isoformat()),
         ).fetchall()
 
         day_hours, unknown = [], []
@@ -1954,6 +1961,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             timed = [sh for sh in shifts
                      if sh.get("start_at") and sh.get("end_at")
                      and "unpaid_breaks" in sh]
+            # PARTIAL data is refused too: one closed timecard stored without
+            # clock times (a kitchen or manager punch saved by older code)
+            # would otherwise vanish while the rest of the day looked
+            # complete, quietly under-reporting that person's paid hours.
+            partial = any("unpaid_breaks" not in sh
+                          and not sh.get("missing_clockout")
+                          and not sh.get("invalid_interval")
+                          for sh in shifts)
+            if partial:
+                if r["date"] <= end.isoformat():
+                    unknown.append(r["date"])
+                continue
             # A day that exists but carries no clock times cannot be reconciled:
             # either it was hand-entered, or it was pulled before clock times
             # were stored. A day with a pull and genuinely no timecards (venue
@@ -1965,7 +1984,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # day inside the period (found 2026-09-16: 8/30-8/31 dropped
             # silently, 2.58 h of overtime reported against Square's 5.03).
             if not timed and (r["square_json"] is None or shifts):
-                unknown.append(r["date"])
+                if r["date"] <= end.isoformat():
+                    unknown.append(r["date"])
                 continue
             for sh in timed:
                 for d, h in engine.split_at_midnight(
@@ -1973,7 +1993,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         datetime.fromisoformat(sh["end_at"]), tz,
                         breaks=[(datetime.fromisoformat(b0),
                                  datetime.fromisoformat(b1))
-                                for b0, b1 in sh["unpaid_breaks"]]):
+                                for b0, b1 in sh["unpaid_breaks"]],
+                        day_start_minutes=day_start):
                     day_hours.append((sh["employee_id"], d, h,
                                       sh.get("rate_cents") or 0))
         worked = sum(h for _, d, h, _r in day_hours if start <= d <= end)

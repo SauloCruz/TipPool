@@ -579,7 +579,7 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
             # pooled and the shift is still shown so the day explains itself.
             cards.append({"employee_id": emp["id"], "name": emp["display_name"],
                           "role": "EXCLUDED", "job_title": title,
-                          "declared_cents": declared})
+                          "declared_cents": declared, **_clock(tc)})
             continue
 
         if role == "BOH":
@@ -598,7 +598,8 @@ def extract_timecards(timecards: list[dict], emp_by_tmid: dict[str, dict],
             cards.append({"employee_id": emp["id"], "name": emp["display_name"],
                           "role": "BOH", "job_title": title,
                           "declared_cents": declared,
-                          **({"minutes": round(mins)} if mins is not None else {})})
+                          **({"minutes": round(mins)} if mins is not None else {}),
+                          **_clock(tc)})
             if emp["pool_role"] == "FOH":
                 role_mismatch.append(
                     f"{emp['display_name']} worked {title} (kitchen) but is "
@@ -728,6 +729,18 @@ _TITLE_ROLE_HINTS = (
     ("host", "HOST"),
     ("cook", "BOH"), ("chef", "BOH"), ("kitchen", "BOH"), ("dish", "BOH"),
 )
+
+
+def _clock(tc: dict) -> dict:
+    """Clock times, unpaid breaks and pay rate for a timecard that earns no
+    tip share (a kitchen roster punch, a manager's shift). The tip pool never
+    needs them, but payroll does: without them the payroll sheet silently
+    left out every kitchen and manager hour at Tavern Law (found 2026-09-16).
+    Nothing is returned for a missing clock-out, which the pull flags."""
+    if not tc.get("end_at"):
+        return {}
+    return {"start_at": tc["start_at"], "end_at": tc["end_at"],
+            "unpaid_breaks": _unpaid_breaks(tc), "rate_cents": _rate_cents(tc)}
 
 
 def _unpaid_breaks(tc: dict) -> list[list[str]]:

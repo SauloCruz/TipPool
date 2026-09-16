@@ -843,3 +843,42 @@ class TestShiftsRecordUnpaidBreaks:
         fn = src.split("def labor_hours_for(")[1].split("\n    def ")[0]
         assert '"unpaid_breaks" in sh' in fn
         assert 'sh["unpaid_breaks"]' in fn
+
+
+class TestNonEarningPunchesKeepTheirClock:
+    """A kitchen roster punch or a manager's shift earns no hourly tip share,
+    but it is still paid time. Tavern Law stored those cards with no clock
+    times, so the payroll sheet silently left out every kitchen and manager
+    hour (found 2026-09-16)."""
+
+    TC = {"team_member_id": "TM1", "start_at": "2026-09-15T14:00:00-07:00",
+          "end_at": "2026-09-15T22:30:00-07:00",
+          "wage": {"title": "Kitchen Staff", "hourly_rate": {"amount": 2400, "currency": "USD"}},
+          "declared_cash_tip_money": {"amount": 0, "currency": "USD"}}
+
+    def _extract(self, title, role):
+        from app.square_extract import extract_timecards
+        from engine import TippableWindow
+        from datetime import date
+        from decimal import Decimal
+        tc = dict(self.TC, wage={**self.TC["wage"], "title": title})
+        emp = {"TM1": {"id": 5, "display_name": "Kit", "pool_role": "BOH"}}
+        return extract_timecards([tc], emp, date(2026, 9, 15),
+                                 {i: TippableWindow() for i in range(7)},
+                                 "America/Los_Angeles", Decimal("0.05"),
+                                 job_roles={title: role})["timecards"][0]
+
+    def test_kitchen_punch_carries_clock_and_rate(self):
+        card = self._extract("Kitchen Staff", "BOH")
+        assert card["start_at"] and card["end_at"]
+        assert card["unpaid_breaks"] == [] and card["rate_cents"] == 2400
+
+    def test_manager_shift_carries_clock_and_rate(self):
+        card = self._extract("Bar Manager", "EXCLUDED")
+        assert card["start_at"] and card["end_at"] and card["rate_cents"] == 2400
+
+    def test_a_day_with_one_card_lacking_clock_times_is_refused(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "main.py").read_text()
+        fn = src.split("def labor_hours_for(")[1].split("\n    def ")[0]
+        assert "partial = any(" in fn

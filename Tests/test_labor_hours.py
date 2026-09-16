@@ -260,3 +260,36 @@ class TestUnpaidBreaksAreNotPaidHours:
         assert split_at_midnight(dt("2026-08-15T17:00:00-07:00"),
                                  dt("2026-08-15T23:30:00-07:00"), TZ) == \
             [(date(2026, 8, 15), 6.5)]
+
+
+class TestReportingDayStart:
+    """Paid hours follow the Square account's REPORTING DAY, which is not
+    always midnight. Found 2026-09-16: Tavern Law reports 3:00 am to 2:59 am,
+    so Bree Staab's 8/31 15:59-01:02 shift belongs wholly to 8/31 — the app
+    was putting 1.03 h into the 9/1-9/15 pay period (28.70 h vs Square
+    Payroll's 27.67). Poquitos reports midnight to midnight."""
+
+    def test_midnight_is_still_the_default(self):
+        pieces = dict(split_at_midnight(dt("2026-08-31T15:59:00-07:00"),
+                                        dt("2026-09-01T01:02:00-07:00"), TZ))
+        assert round(pieces[date(2026, 9, 1)], 2) == 1.03
+
+    def test_a_three_am_day_keeps_the_closing_hour_on_the_night(self):
+        pieces = split_at_midnight(dt("2026-08-31T15:59:00-07:00"),
+                                   dt("2026-09-01T01:02:00-07:00"), TZ,
+                                   day_start_minutes=180)
+        assert [d for d, _ in pieces] == [date(2026, 8, 31)]
+        assert round(pieces[0][1], 2) == 9.05
+
+    def test_a_punch_after_midnight_belongs_to_the_day_before(self):
+        pieces = split_at_midnight(dt("2026-09-16T00:11:00-07:00"),
+                                   dt("2026-09-16T00:21:00-07:00"), TZ,
+                                   day_start_minutes=180)
+        assert pieces[0][0] == date(2026, 9, 15)
+
+    def test_a_shift_past_the_boundary_still_splits(self):
+        pieces = dict(split_at_midnight(dt("2026-09-15T20:00:00-07:00"),
+                                        dt("2026-09-16T04:00:00-07:00"), TZ,
+                                        day_start_minutes=180))
+        assert pieces[date(2026, 9, 15)] == pytest.approx(7.0)
+        assert pieces[date(2026, 9, 16)] == pytest.approx(1.0)
