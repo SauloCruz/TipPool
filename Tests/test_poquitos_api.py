@@ -1748,3 +1748,69 @@ class TestPeriodRefresh:
                           headers=poq["h"]).json()["status"] == "draft"
         assert opened not in {d["date"] for d in out["moved_days"]}
         assert out["left_open"][0]["error"]
+
+
+class TestOvertimeLookbackDays:
+    """Weekly overtime for a period that starts mid-week depends on the days
+    before it. Found 2026-09-16: Poquitos 9/1 is a Tuesday, 8/30-8/31 were
+    stored without the break field, and the reader dropped them silently —
+    2.58 h of overtime reported against Square's 5.03. A lookback day that
+    cannot be trusted must be REPORTED, and the backfill must fetch it."""
+
+    # 2027-06-01 is a Tuesday, so the period 6/1-6/15 needs Mon 5/31 (and
+    # Sun 5/30) from the PREVIOUS period to settle the first week's overtime
+    LOOK, FIRST = "2027-05-31", "2027-06-01"
+
+    def _pull(self, client, poq, day, start, end):
+        fake = client.app.state.square_client_factory()
+        fake.payments, fake.orders = [], []
+        fake.timecards = [
+            {"team_member_id": "TM_ANA", "wage": {"title": "Bartender",
+             "hourly_rate": {"amount": 2000, "currency": "USD"}},
+             "start_at": start, "end_at": end,
+             "declared_cash_tip_money": money(0)}]
+        assert client.post(f"/api/days/{day}/pull", headers=poq["h"]).status_code == 200
+
+    def test_a_stale_lookback_day_is_reported_then_fetched(self, client, poq, staff):
+        self._pull(client, poq, self.LOOK,
+                   "2027-05-31T10:00:00-07:00", "2027-05-31T20:00:00-07:00")
+        self._pull(client, poq, self.FIRST,
+                   "2027-06-01T10:00:00-07:00", "2027-06-01T20:00:00-07:00")
+        # reproduce a lookback day stored before breaks were recorded
+        from app.db import connect
+        conn = connect(os.environ["DB_PATH"])
+        row = conn.execute("SELECT id, square_json FROM day WHERE date = ?",
+                           (self.LOOK,)).fetchone()
+        rec = json.loads(row["square_json"])
+        for sh in rec["raw"]["shifts"]:
+            sh.pop("unpaid_breaks", None)
+        conn.execute("UPDATE day SET square_json = ? WHERE id = ?",
+                     (json.dumps(rec), row["id"]))
+        conn.commit(); conn.close()
+
+        t = client.get(f"/api/periods/{self.FIRST}/export", headers=poq["h"]).json()["totals"]
+        # outside the period, but it decides this period's overtime — so it
+        # is named, not dropped
+        assert self.LOOK in t["hours_unknown_dates"]
+
+        # one press of the backfill reaches back to the start of the week
+        r = client.post(f"/api/periods/{self.FIRST}/refresh-labor",
+                        headers=poq["h"]).json()
+        assert self.LOOK in r["updated"]
+        t = client.get(f"/api/periods/{self.FIRST}/export", headers=poq["h"]).json()["totals"]
+        assert self.LOOK not in t["hours_unknown_dates"]
+
+    def test_the_backfill_reaches_back_to_the_week_start(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "main.py").read_text()
+        fn = src.split("def refresh_period_labor(")[1].split("\n    @app.")[0]
+        assert "lookback" in fn
+        assert "period_days(lookback, end)" in fn
+
+    def test_the_reader_reports_lookback_days(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "main.py").read_text()
+        fn = src.split("def labor_hours_for(")[1].split("\n    def ")[0]
+        # no longer restricted to dates inside the period
+        assert 'if start.isoformat() <= r["date"] <= end.isoformat():\n                    unknown.append' not in fn
+        assert "unknown.append(r[\"date\"])" in fn

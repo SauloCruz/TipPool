@@ -1489,7 +1489,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                        resolve_scheme(venue, scheme))
         client = get_square_client(venue)
         updated, skipped, failed = [], [], []
-        for d in period_days(start, end):
+        # Load back to the start of the workweek containing `start`: those
+        # days belong to the previous period but decide this period's
+        # overtime, and fetching only the period left them stale.
+        week_start = settings_store.poq_workweek_start(
+            settings_store.all_settings(conn, venue["id"]))
+        lookback = start - timedelta(days=(start.weekday() - week_start) % 7)
+        for d in period_days(lookback, end):
             row = day_row(conn, venue["id"], d)
             if row is None or row["square_json"] is None:
                 skipped.append(d.isoformat())      # never pulled; nothing to enrich
@@ -1953,9 +1959,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # were stored. A day with a pull and genuinely no timecards (venue
             # closed) is known to be zero, not unknown. A date with no row at
             # all never happened and is simply absent.
+            # This includes the lookback days before `start`: they sit in the
+            # previous period but feed this period's weekly overtime, so a
+            # missing one under-reports overtime just as surely as a missing
+            # day inside the period (found 2026-09-16: 8/30-8/31 dropped
+            # silently, 2.58 h of overtime reported against Square's 5.03).
             if not timed and (r["square_json"] is None or shifts):
-                if start.isoformat() <= r["date"] <= end.isoformat():
-                    unknown.append(r["date"])
+                unknown.append(r["date"])
                 continue
             for sh in timed:
                 for d, h in engine.split_at_midnight(
