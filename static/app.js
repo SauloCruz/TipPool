@@ -791,7 +791,10 @@ async function renderDay(dateArg) {
             await api(`/api/days/${dateStr}/event-deposits`,
                       { method: "PUT", body: { deposit_ids: [...next] } });
           } catch (err) { toast(err.message, true); return; }
-          renderDayDispatch(dateStr);   // event tips are re-derived server-side
+          // route() clears the screen first; calling the renderer directly
+          // appended a SECOND copy of the day below the stale one, so the
+          // tick never appeared to change even though the save had worked.
+          route();                      // event tips are re-derived server-side
         });
         depWrap.append(row);
       }

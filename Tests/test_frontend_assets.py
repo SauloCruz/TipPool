@@ -399,3 +399,27 @@ class TestPayrollSheetExplainsItsOwnTotal:
 
     def test_the_note_only_appears_when_there_is_something_to_say(self):
         assert "(p.totals.contractor_pay || {}).names || []).length" in self.FN
+
+
+class TestScreensRedrawThroughRoute:
+    """route() clears the view before rendering; calling a render function
+    directly appends a second copy of the screen under the stale one. The
+    event-deposit picker did that, so ticking a deposit saved correctly but
+    the tick never appeared and the page silently doubled (owner 2026-10-01)."""
+
+    def test_the_deposit_picker_redraws_through_route(self):
+        fn = APP_JS.split("api(`/api/days/${dateStr}/event-deposits`")[2]
+        assert "route();" in fn[:400]
+        assert "renderDayDispatch(dateStr)" not in fn[:400]
+
+    def test_no_handler_redraws_a_whole_SCREEN_directly(self):
+        """Only screen-level renderers — the ones in the routes table, plus
+        the day dispatcher — must go through route(). Local helpers like
+        renderRail or renderReview redraw their own container and are fine."""
+        import re
+        table = re.search(r"const routes = \{(.*?)\};", APP_JS, re.S).group(1)
+        screens = set(re.findall(r":\s*(render[A-Za-z]+)", table)) | {"renderDayDispatch"}
+        bad = [l.strip() for l in APP_JS.splitlines()
+               if (m := re.match(r"^\s+(?:await\s+)?(render[A-Za-z]+)\(", l))
+               and m.group(1) in screens]
+        assert bad == [], bad
