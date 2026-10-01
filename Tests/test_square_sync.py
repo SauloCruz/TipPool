@@ -882,3 +882,38 @@ class TestNonEarningPunchesKeepTheirClock:
         src = (Path(__file__).parent.parent / "app" / "main.py").read_text()
         fn = src.split("def labor_hours_for(")[1].split("\n    def ")[0]
         assert "partial = any(" in fn
+
+
+class TestEventTipsAreTheDepositAlone:
+    """Owner 2026-10-01: event tips = the attached deposit, full stop. A card
+    tip left on the event ticket belongs to the night's floor and stays in
+    credit tips, the same way the gratuity service charge stays in
+    auto-gratuity (2026-09-01). Found on TL 2026-09-24, which read $889.15 of
+    event tips — the $492.07 deposit plus a $397.08 tip on the ticket."""
+
+    def test_a_card_tip_on_the_event_ticket_stays_in_credit_tips(self):
+        from app.square_extract import extract_credit_tips, extract_event_tips
+        ev_order = {"id": "EV1", "line_items": [],
+                    "service_charges": [{"type": "AUTO_GRATUITY",
+                                         "applied_money": money(5000)}]}
+        pays = [{"id": "p1", "order_id": "EV1", "status": "COMPLETED",
+                 "card_details": {}, "tip_money": money(39708),
+                 "total_money": money(200000)},
+                {"id": "p2", "order_id": "OTHER", "status": "COMPLETED",
+                 "card_details": {}, "tip_money": money(2500),
+                 "total_money": money(12500)}]
+        # the night's credit tips now include the event ticket's own tip
+        assert extract_credit_tips(pays)["credit_tips_cents"] == 39708 + 2500
+        # the extractor still reports it, so the day can show where it came from
+        rep = extract_event_tips([ev_order], pays, ["EV1"],
+                                 {"catalog_object_id": None, "name_contains": "gratuity"})
+        assert rep["lines"][0]["tips_cents"] == 39708
+
+    def test_the_pull_reports_the_deposit_as_event_tips(self, client, fake, roster):
+        """End to end: event tips equal the attached deposit, and the total
+        tips for the night are unchanged by which line they sit on."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "sync.py").read_text()
+        seg = src.split("def _pull_values_tl")[1] if "_pull_values_tl" in src else src
+        assert '"event_tips_cents": sum(d["gross_cents"] for d in attached)' in seg
+        assert "extract_credit_tips(payments)" in seg

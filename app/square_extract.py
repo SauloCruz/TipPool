@@ -172,7 +172,13 @@ def extract_event_tips(orders: list[dict], payments: list[dict],
                        event_order_ids: Iterable[str],
                        grat_cfg: dict | None = None,
                        house_names: Iterable[str] = ()) -> dict:
-    """Card tips riding on an event ticket.
+    """Card tips riding on an event ticket — REPORTED, not pooled separately.
+
+    Since 2026-10-01 the caller does not add these to event tips: a card tip
+    on the event ticket is an ordinary tip for the night's floor and stays in
+    credit tips. Event tips are the attached deposit alone. This function
+    still identifies the money so the day screen can show where it came from.
+
 
     A gratuity SERVICE CHARGE on an event ticket is deliberately NOT counted
     here (owner 2026-09-01, superseding the 2026-08-29 ruling that rolled it

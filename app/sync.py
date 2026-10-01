@@ -148,13 +148,18 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
     food = extract_food_sales(orders, catalog_lookup, settings["category_map"])
     event = extract_event_items(orders, catalog_lookup, settings["category_map"],
                                 settings["tl_event_items"])
-    # An event ticket's own tips and gratuity belong to the event, not to the
-    # night's floor (owner 2026-08-29) — so they come out of the daily pools.
+    # Event tips are the attached DEPOSIT and nothing else (owner
+    # 2026-10-01). A card tip left on the event ticket is an ordinary tip for
+    # the night's floor and stays in credit tips, exactly like the gratuity
+    # service charge stays in auto-gratuity (2026-09-01). Both supersede the
+    # 2026-08-29 rule that pulled an event ticket's own tip money out of the
+    # daily pools. At Tavern Law the whole night is one pool, so this moves
+    # nothing between people — it is which line the money is reported on.
     ev_ids = event["order_ids"]
     ev_tips = extract_event_tips(orders, payments, ev_ids,
                                  settings["gratuity_service_charge"],
                                  settings["house_service_charges"])
-    tips = extract_credit_tips(payments, exclude_order_ids=ev_ids)
+    tips = extract_credit_tips(payments)
     # An event ticket's gratuity service charge is NOT excluded (owner
     # 2026-09-01): a service charge is wages wherever it was rung, so it
     # belongs on the auto-gratuity line and keeps that line reconcilable
@@ -183,8 +188,8 @@ def pull_day(conn: sqlite3.Connection, client: SquareClient, venue: sqlite3.Row,
         "credit_tips_cents": tips["credit_tips_cents"],
         "auto_gratuity_cents": grat["auto_gratuity_cents"],
         "event_food_sales_cents": event["event_food_cents"],
-        "event_tips_cents": ev_tips["event_tips_cents"]
-                            + sum(d["gross_cents"] for d in attached),
+        # the deposit only; the ticket's own card tip is in credit tips above
+        "event_tips_cents": sum(d["gross_cents"] for d in attached),
     }
     if not labor_blocked:
         values.update({
