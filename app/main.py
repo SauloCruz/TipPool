@@ -986,8 +986,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 "keep" if existing_link else None)
         check_contractor(want_contractor, want_rate,
                          None if want_link in ("", None) else want_link)
-        # a 1099 worker must never reach the payroll entry sheet
+        # A 1099 worker must never reach the payroll entry sheet. Asking for
+        # one to be ON payroll is a real intention — they have been taken on
+        # as an employee — so say what is needed instead of silently flipping
+        # the flag back, which looked like a dead button (owner 2026-10-01).
         if want_contractor:
+            if changes.get("in_payroll") and "is_contractor" not in changes:
+                raise HTTPException(
+                    422, "this person is contract labour, so they are kept off "
+                         "the payroll sheet. If they are now a payroll "
+                         "employee, use 'Move to payroll' to clear the "
+                         "contract flag, then link their Square account.")
             changes["in_payroll"] = False
         # Square links live in square_link (one person, many accounts):
         # "" clears every link for this employee; a value ADDS a link.

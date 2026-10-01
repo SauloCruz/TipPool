@@ -3348,11 +3348,32 @@ async function renderEmployees() {
           : "Not a payroll employee — kept off the payroll entry sheet",
       }, e.in_payroll ? "on payroll" : "not on payroll");
       payrollFlag.addEventListener("click", async () => {
-        await api(`/api/employees/${e.id}`, { method: "PATCH",
-          body: { in_payroll: !e.in_payroll } });
-        toast(`${e.display_name} ${e.in_payroll ? "removed from" : "added to"} payroll`);
-        route();
+        try {
+          await api(`/api/employees/${e.id}`, { method: "PATCH",
+            body: { in_payroll: !e.in_payroll } });
+          toast(`${e.display_name} ${e.in_payroll ? "removed from" : "added to"} payroll`);
+          route();
+        } catch (err) { toast(err.message, true); }   // never fail silently
       });
+      // Contract labour that has since been taken on as an employee: clearing
+      // the flag is the documented move and had no control at all, so the
+      // button simply refused and said nothing.
+      const toPayroll = e.is_contractor
+        ? el("button", { class: "small", type: "button",
+                         title: "Clear the contract flag and put them on the payroll sheet" },
+             "Move to payroll")
+        : null;
+      if (toPayroll) {
+        toPayroll.addEventListener("click", async () => {
+          try {
+            await api(`/api/employees/${e.id}`, { method: "PATCH",
+              body: { is_contractor: false, in_payroll: true } });
+            toast(`${e.display_name} moved to payroll — now link their Square `
+                  + "account in Setup", false);
+            route();
+          } catch (err) { toast(err.message, true); }
+        });
+      }
       const activeBtn = el("button", { class: "ghost small" }, e.active ? "Deactivate" : "Activate");
       activeBtn.addEventListener("click", async () => {
         await api(`/api/employees/${e.id}`, { method: "PATCH", body: { active: !e.active } });
@@ -3371,6 +3392,7 @@ async function renderEmployees() {
                  e.w9_received ? "contract" : "contract · no W-9")
             : (e.in_payroll ? null : el("span", { class: "src manual" }, "no payroll"))),
         el("div", { class: "row" }, ...(poolFlag ? [poolFlag] : []),
+          ...(toPayroll ? [toPayroll] : []),
           payrollFlag, roleSel, activeBtn)));
     }
     view.append(card);

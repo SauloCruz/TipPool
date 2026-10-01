@@ -408,3 +408,57 @@ class TestContractorPayIsReported:
         sheet = sum(r["gratuity_cents"] for r in p["payroll"])
         assert sheet + cp["gratuity_cents"] == sum(
             e["gratuity_cents"] for e in p["employees"])
+
+
+class TestMovingContractLabourOntoPayroll:
+    """A contractor taken on as an employee has to be convertible. The flag
+    forces in_payroll off, so asking for them to be ON payroll used to be
+    silently flipped back — the button looked dead (owner 2026-10-01)."""
+
+    def _contractor(self, client, H, name="Convert Me"):
+        r = client.post("/api/employees", headers=H, json={
+            "display_name": name, "pool_role": "FOH",
+            "is_contractor": True, "hourly_rate_cents": 2000})
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    def _venue(self, client):
+        v = {x["slug"]: x for x in client.get("/api/venues").json()}
+        return {"X-Venue-Id": str(v["tavern-law"]["id"])}
+
+    def test_putting_a_contractor_on_payroll_is_refused_with_a_reason(self, client):
+        H = self._venue(client); eid = self._contractor(client, H, "Refuse Me")
+        r = client.patch(f"/api/employees/{eid}", headers=H, json={"in_payroll": True})
+        assert r.status_code == 422
+        assert "Move to payroll" in r.json()["detail"]
+        rows = {e["id"]: e for e in client.get("/api/employees", headers=H).json()}
+        assert rows[eid]["in_payroll"] == 0 and rows[eid]["is_contractor"] == 1
+
+    def test_clearing_the_flag_and_joining_payroll_in_one_move(self, client):
+        H = self._venue(client); eid = self._contractor(client, H, "Convert Me")
+        r = client.patch(f"/api/employees/{eid}", headers=H,
+                         json={"is_contractor": False, "in_payroll": True})
+        assert r.status_code == 200, r.text
+        row = {e["id"]: e for e in client.get("/api/employees", headers=H).json()}[eid]
+        assert row["is_contractor"] == 0 and row["in_payroll"] == 1
+
+    def test_only_then_can_their_square_account_be_linked(self, client):
+        """The two states are exclusive, so the link has to come after."""
+        H = self._venue(client); eid = self._contractor(client, H, "Link Me")
+        r = client.patch(f"/api/employees/{eid}", headers=H,
+                         json={"square_team_member_id": "TM_NEW"})
+        assert r.status_code == 422
+        assert "clear the contractor flag" in r.json()["detail"]
+        client.patch(f"/api/employees/{eid}", headers=H,
+                     json={"is_contractor": False, "in_payroll": True})
+        assert client.patch(f"/api/employees/{eid}", headers=H,
+                            json={"square_team_member_id": "TM_NEW"}).status_code == 200
+
+    def test_the_staff_screen_offers_the_move_and_reports_failures(self):
+        from pathlib import Path
+        js = (Path(__file__).parent.parent / "static" / "app.js").read_text()
+        assert '"Move to payroll"' in js
+        assert "is_contractor: false, in_payroll: true" in js
+        # the payroll toggle must not swallow a refusal
+        seg = js.split("payrollFlag.addEventListener")[1][:600]
+        assert "catch" in seg and "toast(err.message, true)" in seg
