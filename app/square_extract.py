@@ -229,9 +229,20 @@ def extract_event_tips(orders: list[dict], payments: list[dict],
 def extract_credit_tips(payments: list[dict],
                         exclude_order_ids: Iterable[str] = ()) -> dict:
     """Σ tip_money on COMPLETED card payments, net of refunded tips.
+
     Refund split rule: a refund eats the non-tip portion first, so the tip
     is considered refunded only for the part exceeding it:
         refunded_tip = clamp(refunded_total - (payment_total - tip), 0, tip)
+    ...EXCEPT when the refund is exactly the tip, which is the tip itself
+    being handed back. Found 2026-10-01: a $55.28 check on 9/17 carried a
+    $12.00 tip and was refunded $12.00 four minutes later, reason "Accidental
+    Charge" — somebody keyed the tip wrong and gave it back. The non-tip-first
+    rule netted nothing and we distributed $12.00 the venue no longer had,
+    which is exactly the gap against Square's own $1,113.48. Square has no API
+    field saying which part of a payment a refund hit (the order carries no
+    `returns` for a payment-level refund), so an exact match is the only
+    signal there is; the general rule is unchanged and still reproduces
+    Square's Net Service Charges on partial refunds.
 
     `exclude_order_ids` drops payments belonging to a private event: that
     money is the event pool's, not the daily pool's (see extract_event_money).
@@ -249,7 +260,10 @@ def extract_credit_tips(payments: list[dict],
             continue
         pay_total = _amount(p.get("total_money"))
         refunded = _amount(p.get("refunded_money"))
-        refunded_tip = min(tip, max(0, refunded - (pay_total - tip)))
+        if refunded and refunded == tip:
+            refunded_tip = tip          # the tip itself was handed back
+        else:
+            refunded_tip = min(tip, max(0, refunded - (pay_total - tip)))
         net = tip - refunded_tip
         total += net
         rows.append({"payment_id": p.get("id"), "tip_cents": tip,

@@ -135,6 +135,21 @@ class TestCreditTips:
         out = extract_credit_tips([payment("P1", 500, 5500, refunded=5200)])
         assert out["credit_tips_cents"] == 300
 
+    def test_refund_equal_to_the_tip_is_a_refunded_tip(self):
+        # Tavern Law 9/17: $55.28 check, $12.00 tip, $12.00 refunded four
+        # minutes later ("Accidental Charge"). The non-tip-first rule netted
+        # nothing and paid out $12 the venue had given back; Square's own
+        # figure nets it. An exact match is the only signal the API gives.
+        out = extract_credit_tips([payment("P1", 1200, 6728, refunded=1200)])
+        assert out["credit_tips_cents"] == 0
+        assert out["payments"][0]["refunded_tip_cents"] == 1200
+
+    def test_refund_smaller_than_the_tip_still_eats_the_check_first(self):
+        # the general rule is unchanged: a $9.95 item refund on a $76.94 check
+        # does not touch the $12.82 tip
+        out = extract_credit_tips([payment("P1", 1282, 7694, refunded=995)])
+        assert out["credit_tips_cents"] == 1282
+
 
 # ---------- auto gratuity ----------
 
