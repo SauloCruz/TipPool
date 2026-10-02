@@ -51,6 +51,18 @@ INFO_FLAGS = {"no_host_resplit"}
 # total reaches this. Counted per venue (owner 2026-08-30).
 CONTRACTOR_1099_CENTS = 60000
 
+# Per model, the payout-row fields that are money owed to a person — used to
+# diff a day's payouts before and after a re-pull. Named rather than summed
+# generically because La Fontana's rows carry `payout_cents` alongside its
+# three components and the server's own collected `tips_cents`, so a blanket
+# sum of `*_cents` counts the same money three times. A model that gains a
+# pool must be added here; TestPayoutFieldsCoverEveryModel enforces it.
+PAYOUT_FIELDS = {
+    "POOL_HOURS": frozenset({"tips_cents", "gratuity_cents", "share_cents"}),
+    "POINTS_HOURS": frozenset({"tips_cents", "gratuity_cents", "event_cents"}),
+    "PERCENT_TIPOUT": frozenset({"payout_cents", "gratuity_cents"}),
+}
+
 
 # ---------- request/response models ----------
 
@@ -1566,20 +1578,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         conn.commit()
         return day_payload(conn, venue, d)
 
-    def _payout_by_person(outputs: dict | None) -> dict[int, int]:
+    def _payout_by_person(outputs: dict | None, model: str) -> dict[int, int]:
         """What each person was owed, whatever the venue's model calls it.
 
-        Sums every `*_cents` field on a payout row rather than naming them, so
-        this keeps working as models gain pools (the event pool did exactly
-        that) instead of quietly comparing a subset.
+        Rows are read from EVERY top-level list that carries `employee_id`,
+        not from a key called `people`: only Poquitos and La Fontana use that
+        name, and Tavern Law splits its rows into `foh` and `boh`. Looking for
+        one key meant a Tavern Law refresh always reported nothing moved —
+        found 2026-10-01 re-pulling 9/17, where five payouts changed by $2.40
+        each and the diff came back empty. Someone can appear in two lists
+        (the bartender drafted onto a Poquitos event), so rows accumulate.
+
+        Which fields are money is named per model rather than summed
+        generically: La Fontana's rows carry `payout_cents` AND its three
+        components AND the server's own collected `tips_cents`, which is not
+        a payout at all, so a blanket sum of `*_cents` would count the same
+        money three times. `TestPayoutFieldsCoverEveryModel` asserts every
+        money field each engine emits is named here, so a model that gains a
+        pool fails a test instead of dropping silently out of the diff.
         """
+        fields = PAYOUT_FIELDS[model]
         out: dict[int, int] = {}
-        for row in (outputs or {}).get("people", []) or ():
-            eid = row.get("employee_id")
-            if eid is None:
+        for rows in (outputs or {}).values():
+            if not isinstance(rows, list):
                 continue
-            out[eid] = sum(v for k, v in row.items()
-                           if k.endswith("_cents") and isinstance(v, int))
+            for row in rows:
+                if not isinstance(row, dict) or row.get("employee_id") is None:
+                    continue
+                out[row["employee_id"]] = out.get(row["employee_id"], 0) + sum(
+                    v for k, v in row.items()
+                    if k in fields and isinstance(v, int))
         return out
 
     def _refresh_one_day(conn, venue, admin, client, d: date) -> dict:
@@ -1607,7 +1635,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # pulling now would recompute a hand-entered day from scratch
             return {"date": iso, "status": "skipped", "reason": "never pulled"}
 
-        before = _payout_by_person(snapshot_outputs(conn, row["id"]))
+        before = _payout_by_person(snapshot_outputs(conn, row["id"]),
+                                   venue["tip_model"])
         try:
             record = sync.pull_day(conn, client, venue, d, admin["id"])
         except SquareError as exc:
@@ -1633,7 +1662,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except HTTPException as exc:
             return {"date": iso, "status": "left_open", "error": exc.detail}
 
-        after = _payout_by_person(payload.get("computed"))
+        after = _payout_by_person(payload.get("computed"), venue["tip_model"])
         names = {eid: e["display_name"]
                  for eid, e in employees_map(conn, venue["id"]).items()}
         moved = []

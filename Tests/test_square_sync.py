@@ -5,7 +5,7 @@ v1 -> v2 DB migration."""
 import json
 import os
 import sqlite3 as sqlite3_mod
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -917,3 +917,131 @@ class TestEventTipsAreTheDepositAlone:
         seg = src.split("def _pull_values_tl")[1] if "_pull_values_tl" in src else src
         assert '"event_tips_cents": sum(d["gross_cents"] for d in attached)' in seg
         assert "extract_credit_tips(payments)" in seg
+
+
+class TestRefreshDiffAtTavernLaw:
+    """Re-pulling a locked day must name whose payout moved — the whole point
+    of the one-click refresh. Tavern Law's payout rows live under `foh` and
+    `boh`, not the `people` key Poquitos and La Fontana use, and the diff only
+    looked at `people`: every Tavern Law refresh reported nothing moved. Found
+    2026-10-01 re-pulling 9/17, where a refunded tip took $2.40 off each of
+    five people and the refresh came back empty."""
+
+    def _finalized(self, client, fake, day, tip_cents=100000):
+        seed_square(fake)
+        # seed_square's timecards are dated 7/3; move them onto the day under
+        # test or they clip to zero tippable hours and there are no FOH rows
+        nxt = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+        for tc in fake.timecards:
+            tc["start_at"] = tc["start_at"].replace("2026-07-03", day).replace("2026-07-04", nxt)
+            tc["end_at"] = tc["end_at"].replace("2026-07-03", day).replace("2026-07-04", nxt)
+        client.put("/api/settings", json={"category_map": {
+            "CAT_FOOD": {"name": "Kitchen", "group": "FOOD"},
+            "CAT_BEER": {"name": "Beer", "group": "ALCOHOL"},
+        }})
+        fake.payments[0]["tip_money"] = money(tip_cents)
+        client.post(f"/api/days/{day}/pull")
+        r = client.post(f"/api/days/{day}/finalize")
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_a_changed_tip_names_every_person_who_moved(self, client, fake, roster):
+        day = "2026-07-18"
+        before = self._finalized(client, fake, day)
+        was = {r["name"] for r in before["computed"]["foh"]}
+        fake.payments[0]["tip_money"] = money(80000)   # a tip refunded since
+        out = client.post(f"/api/days/{day}/refresh").json()
+        assert out["refresh"]["moved"], "a Tavern Law payout moved and must be named"
+        moved = {m["name"]: m for m in out["refresh"]["moved"]}
+        assert set(moved) >= was, "every FOH person's share changed"
+        assert all(moved[n]["delta_cents"] < 0 for n in was)
+        assert out["refresh"]["moved_total_cents"] != 0
+
+    def test_the_kitchen_side_is_diffed_too(self, client, fake, roster):
+        """`boh` is a second list of payout rows; a food-sales change moves it,
+        so it cannot ride along on an FOH assertion."""
+        day = "2026-07-19"
+        self._finalized(client, fake, day)
+        fake.orders[0]["line_items"][0]["gross_sales_money"] = money(200000)
+        out = client.post(f"/api/days/{day}/refresh").json()
+        moved = {m["name"]: m for m in out["refresh"]["moved"]}
+        assert "Benito" in moved and moved["Benito"]["delta_cents"] > 0
+
+    def test_an_unchanged_day_still_reports_nothing(self, client, fake, roster):
+        day = "2026-07-20"
+        self._finalized(client, fake, day)
+        out = client.post(f"/api/days/{day}/refresh").json()
+        assert out["refresh"]["moved"] == []
+
+
+class TestPayoutFieldsCoverEveryModel:
+    """The diff names which row fields are money per model instead of summing
+    every `*_cents`, because La Fontana's rows carry `payout_cents` AND its
+    three components AND the server's own collected tips — a blanket sum
+    counts the same money three times. The cost of naming them is that a model
+    gaining a pool could drop out of the diff unnoticed, so every money field
+    each engine emits is accounted for here: either it is a payout, or it is
+    listed below with the reason it is not."""
+
+    NOT_A_PAYOUT = {
+        "POOL_HOURS": set(),
+        "POINTS_HOURS": set(),
+        "PERCENT_TIPOUT": {
+            "tips_cents",        # what the server COLLECTED, not what they keep
+            "keep_cents",        # } the three components of payout_cents;
+            "returned_cents",    # } counting them as well would treble
+            "pool_share_cents",  # } every server's figure
+        },
+    }
+
+    def _rows(self, outputs):
+        return [row for value in outputs.values() if isinstance(value, list)
+                for row in value
+                if isinstance(row, dict) and row.get("employee_id") is not None]
+
+    def _assert_covered(self, model, outputs):
+        from app.main import PAYOUT_FIELDS
+        rows = self._rows(outputs)
+        assert rows, f"{model}: no payout rows to check"
+        seen = {k for row in rows for k, v in row.items()
+                if k.endswith("_cents") and isinstance(v, int)}
+        unaccounted = seen - PAYOUT_FIELDS[model] - self.NOT_A_PAYOUT[model]
+        assert not unaccounted, (
+            f"{model} emits {sorted(unaccounted)}, which the refresh diff will "
+            "ignore: add each to PAYOUT_FIELDS, or to NOT_A_PAYOUT with why")
+
+    def test_pool_hours(self):
+        from app.compute import EMPTY_INPUTS, compute_outputs
+        emps = {1: {"display_name": "Bree", "pool_role": "FOH"},
+                2: {"display_name": "Benito", "pool_role": "BOH"}}
+        self._assert_covered("POOL_HOURS", compute_outputs(
+            {**EMPTY_INPUTS, "food_sales_cents": 100000,
+             "credit_tips_cents": 40000, "auto_gratuity_cents": 5000,
+             "boh_worked": [2], "foh_hours": {1: 7}}, emps))
+
+    def test_points_hours(self):
+        from app.compute import compute_poq_outputs
+        from app.settings_store import DEFAULTS
+        emps = {1: {"display_name": "Ana", "pool_role": "FOH"},
+                2: {"display_name": "Cid", "pool_role": "BOH"}}
+        self._assert_covered("POINTS_HOURS", compute_poq_outputs(
+            {"credit_tips_cents": 50000, "cash_tips_cents": 2000,
+             "auto_gratuity_cents": 4000, "net_sales_cents": 0,
+             "event_service_charge_cents": 10000, "event_tips_cents": 0,
+             "event_card_cents": 0, "event_bartender_employee_id": None,
+             "event_bartender_hours": 0.0,
+             "shifts": [{"employee_id": 1, "role": "BARTENDER", "hours": 7},
+                        {"employee_id": 2, "role": "LINE_COOK", "hours": 8}]},
+            emps, DEFAULTS["poq_roles"], DEFAULTS["poq_job_roles"]))
+
+    def test_percent_tipout(self):
+        from app.compute import compute_lf_outputs
+        from app.settings_store import DEFAULTS
+        emps = {1: {"display_name": "Gia", "pool_role": "SERVER"},
+                2: {"display_name": "Rui", "pool_role": "BUSSER"},
+                3: {"display_name": "Noa", "pool_role": "HOST"}}
+        from app.compute import EMPTY_INPUTS_LF
+        self._assert_covered("PERCENT_TIPOUT", compute_lf_outputs(
+            {**EMPTY_INPUTS_LF, "server_tips": {1: 30000},
+             "hours": {1: 1, 2: 1, 3: 1}, "auto_gratuity_cents": 4000},
+            emps, DEFAULTS["lf_percentages"], DEFAULTS["lf_pool_split_mode"]))
