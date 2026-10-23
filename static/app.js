@@ -3670,6 +3670,78 @@ async function renderSettings() {
       el("div", { class: "row" },
         el("span", { class: "hint", style: "flex:1" }, "Overtime after"), otInput,
         el("span", { class: "unit" }, "h/week"))));
+
+    /* --- POINTS_HOURS: what each Square job is worth -------------------
+       Same rule as Tavern Law: the job chosen at clock-in sets the points,
+       and a job seen on a timecard but missing here blocks the day. */
+    const poqRoles = s.poq_roles || {};
+    const poqJobs = { ...(s.poq_job_roles || {}) };
+    const SIDE_LABEL = { FOH: "front", BOH: "kitchen", EVENT: "event only",
+                         EXCLUDED: "earns nothing" };
+    const roleLabel = (key) => {
+      const r = poqRoles[key];
+      const name = key.toLowerCase().replace(/_/g, " ");
+      const cap = name.charAt(0).toUpperCase() + name.slice(1);
+      if (!r) return cap;
+      return r.side === "EXCLUDED" ? `${cap} — earns nothing`
+        : `${cap} — ${SIDE_LABEL[r.side] || r.side}, ${r.points} pt`;
+    };
+    const roleKeys = Object.keys(poqRoles).sort((a, b) =>
+      roleLabel(a).localeCompare(roleLabel(b)));
+    const roleSelect = (current) => {
+      const sel = el("select", { style: "width:auto" });
+      if (!current) sel.append(el("option", { value: "", selected: "" }, "Choose a role…"));
+      for (const k of roleKeys) {
+        sel.append(el("option", { value: k,
+          ...(current === k ? { selected: "" } : {}) }, roleLabel(k)));
+      }
+      return sel;
+    };
+    const savePoqJobs = () => api("/api/settings", { method: "PUT",
+      body: { poq_job_roles: poqJobs } });
+    const poqJobRows = el("div", { class: "maprows" });
+    function poqJobRow(title) {
+      const sel = roleSelect(poqJobs[title]);
+      sel.addEventListener("change", async () => {
+        const was = poqJobs[title];
+        poqJobs[title] = sel.value;
+        try {
+          await savePoqJobs();
+          toast(`${title} → ${roleLabel(sel.value)}`);
+        } catch (e) {
+          poqJobs[title] = was; sel.value = was; toast(e.message, true);
+        }
+      });
+      return el("div", { class: "row" },
+        el("span", { class: "hint", style: "flex:1" }, title), sel);
+    }
+    for (const title of Object.keys(poqJobs).sort()) poqJobRows.append(poqJobRow(title));
+    const newPoqJob = el("input", { type: "text",
+      placeholder: "Job title, exactly as Square spells it" });
+    const newPoqRole = roleSelect("");
+    const addPoqJob = el("button", { class: "ghost", type: "button" }, "Add job");
+    addPoqJob.addEventListener("click", async () => {
+      const title = newPoqJob.value.trim();
+      if (!title) { toast("type the job title", true); return; }
+      if (title in poqJobs) { toast("that job is already listed", true); return; }
+      // no default role: a guessed role is a guessed rate
+      if (!newPoqRole.value) { toast("choose what this job is worth", true); return; }
+      poqJobs[title] = newPoqRole.value;
+      try { await savePoqJobs(); }
+      catch (e) { delete poqJobs[title]; toast(e.message, true); return; }
+      toast(`${title} → ${roleLabel(newPoqRole.value)} — pull the day again`);
+      newPoqJob.value = ""; newPoqRole.value = "";
+      poqJobRows.append(poqJobRow(title));
+    });
+    view.append(el("div", { class: "card" },
+      el("h2", {}, "What each Square job is worth"),
+      el("div", { class: "note" },
+        "Read off every timecard's job — the job chosen at clock-in sets the "
+        + "points, not the person. A job that turns up on a timecard but is "
+        + "missing from this list blocks the day rather than being guessed at. "
+        + "After adding one, pull the blocked day again."),
+      poqJobRows,
+      el("div", { class: "row" }, newPoqJob, newPoqRole, addPoqJob)));
   } else {
     /* --- POOL_HOURS: host/door tip credit per hour --- */
     const doorInput = el("input", { type: "text", inputmode: "decimal",

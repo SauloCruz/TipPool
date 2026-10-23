@@ -1814,3 +1814,45 @@ class TestOvertimeLookbackDays:
         # no longer restricted to dates inside the period
         assert 'if start.isoformat() <= r["date"] <= end.isoformat():\n                    unknown.append' not in fn
         assert "unknown.append(r[\"date\"])" in fn
+
+
+class TestJobMappingSetting:
+    """A new Square job (e.g. "Kitchen Lead") must be mappable from Setup —
+    the unmapped-title block told managers to do exactly that, and before
+    2026-10-24 there was no way to."""
+
+    def test_unknown_role_is_refused(self, client, poq):
+        s = client.get("/api/settings", headers=poq["h"]).json()
+        jobs = {**s["poq_job_roles"], "Kitchen Lead": "HEAD_HONCHO"}
+        r = client.put("/api/settings", headers=poq["h"],
+                       json={"poq_job_roles": jobs})
+        assert r.status_code == 422
+        assert "HEAD_HONCHO" in r.text
+        after = client.get("/api/settings", headers=poq["h"]).json()
+        assert "Kitchen Lead" not in after["poq_job_roles"]
+
+    def test_blank_title_is_refused(self, client, poq):
+        r = client.put("/api/settings", headers=poq["h"],
+                       json={"poq_job_roles": {" ": "LINE_COOK"}})
+        assert r.status_code == 422
+
+    def test_mapping_a_new_job_unblocks_the_pull(self, client, poq, staff):
+        fake = client.app.state.square_client_factory()
+        fake.timecards = [
+            {"team_member_id": "TM_CID", "start_at": "2026-08-12T16:00:00-07:00",
+             "end_at": "2026-08-13T00:00:00-07:00", "wage": {"title": "Kitchen Lead"},
+             "declared_cash_tip_money": money(0)}]
+        body = client.post("/api/days/2026-08-12/pull", headers=poq["h"]).json()
+        assert "unmapped_job_title" in {i["code"] for i in body["square"]["issues"]}
+
+        s = client.get("/api/settings", headers=poq["h"]).json()
+        jobs = {**s["poq_job_roles"], "Kitchen Lead": "LINE_COOK"}
+        r = client.put("/api/settings", headers=poq["h"],
+                       json={"poq_job_roles": jobs})
+        assert r.status_code == 200, r.text
+        assert r.json()["poq_job_roles"]["Kitchen Lead"] == "LINE_COOK"
+        assert r.json()["poq_job_roles"]["Runner"] == "FOOD_RUNNER"  # untouched
+
+        body = client.post("/api/days/2026-08-12/pull", headers=poq["h"]).json()
+        assert "unmapped_job_title" not in {i["code"] for i in body["square"]["issues"]}
+        assert [s["role"] for s in body["inputs"]["shifts"]] == ["LINE_COOK"]

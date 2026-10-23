@@ -258,6 +258,10 @@ class SettingsPatch(BaseModel):
     # POOL_HOURS: Square job title -> FOH | DOOR | BOH | EXCLUDED. The SHIFT
     # decides the pool role, because staff hold two jobs (owner 2026-08-29).
     tl_job_roles: dict[str, str] | None = None
+    # POINTS_HOURS: Square job title -> poq_roles key. Same idea as TL: the
+    # job chosen at clock-in sets the points. Role keys are checked against
+    # the venue's catalogue in put_settings (it needs the venue).
+    poq_job_roles: dict[str, str] | None = None
     tl_event_items: dict | None = None
     tl_deposit_lookback_days: int | None = Field(default=None, ge=1, le=730)
     # POINTS_HOURS: card processing fee withheld from credit tips before pooling
@@ -286,6 +290,16 @@ class SettingsPatch(BaseModel):
             if role not in allowed:
                 raise ValueError(
                     f"{title!r}: role must be one of {sorted(allowed)}")
+        return dict(v)
+
+    @field_validator("poq_job_roles")
+    @classmethod
+    def _poq_job_titles_valid(cls, v):
+        if v is None:
+            return v
+        for title in v:
+            if not str(title).strip():
+                raise ValueError("a job title cannot be blank")
         return dict(v)
 
     @field_validator("poq_workweek_start")
@@ -1775,6 +1789,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(body: SettingsPatch, admin: Admin, conn: DB, venue: Venue):
+        if body.poq_job_roles is not None:
+            # a job may only point at a role that exists — an unknown key
+            # would value the shift at nothing, the very thing the
+            # unmapped-title block exists to prevent
+            roles = settings_store.get_setting(conn, venue["id"], "poq_roles")
+            bad = sorted({r for r in body.poq_job_roles.values() if r not in roles})
+            if bad:
+                raise HTTPException(422, f"unknown role(s): {', '.join(bad)}")
         for key, value in body.model_dump(exclude_none=True).items():
             if key == "tippable_windows":
                 # partial update: merge into existing weekday map
