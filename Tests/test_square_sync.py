@@ -1045,3 +1045,48 @@ class TestPayoutFieldsCoverEveryModel:
             {**EMPTY_INPUTS_LF, "server_tips": {1: 30000},
              "hours": {1: 1, 2: 1, 3: 1}, "auto_gratuity_cents": 4000},
             emps, DEFAULTS["lf_percentages"], DEFAULTS["lf_pool_split_mode"]))
+
+
+class TestVenueTimezone:
+    """The venue's zone is settable, and it is the venue's location — not the
+    location of whoever is logged in. The owner travels; Square's dashboards
+    bucket by the browser clock and ours must never do that (2026-10-24: a
+    Poquitos week read 54.77 h in Japan against our 51.22)."""
+
+    def test_setting_a_zone_sticks_and_is_audited(self, client, fake, roster):
+        r = client.put("/api/venue/timezone", json={"timezone": "America/New_York"})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"timezone": "America/New_York", "changed": True}
+        assert client.get("/api/me").json()["venue"]["timezone"] == "America/New_York"
+        rows = client.get("/api/audit-log").json()
+        entry = next(x for x in (rows if isinstance(rows, list) else rows["rows"])
+                     if x["action"] == "venue_timezone_changed")
+        detail = json.loads(entry["detail_json"]) if isinstance(entry.get("detail_json"), str) \
+            else entry.get("detail")
+        assert detail["new"] == "America/New_York"
+        client.put("/api/venue/timezone", json={"timezone": "America/Los_Angeles"})
+
+    def test_an_unknown_zone_is_refused(self, client, fake, roster):
+        r = client.put("/api/venue/timezone", json={"timezone": "Mars/Olympus_Mons"})
+        assert r.status_code == 422
+        assert "America/Los_Angeles" in r.json()["detail"]     # says what a good one looks like
+        assert client.get("/api/me").json()["venue"]["timezone"] == "America/Los_Angeles"
+
+    def test_an_unchanged_zone_is_not_audited_as_a_change(self, client, fake, roster):
+        r = client.put("/api/venue/timezone", json={"timezone": "America/Los_Angeles"})
+        assert r.json() == {"timezone": "America/Los_Angeles", "changed": False}
+
+    def test_the_day_boundary_follows_the_venue_zone(self, client, fake, roster):
+        """The point of the setting: pulls are built in the venue's zone, so
+        the window Square is asked for moves with it and not with the server's
+        or the browser's clock."""
+        fake.ranges.clear()
+        client.post("/api/days/2026-07-28/pull")
+        west = [r for r in fake.ranges if r[0] == "payments"][-1][1]
+        client.put("/api/venue/timezone", json={"timezone": "America/New_York"})
+        fake.ranges.clear()
+        client.post("/api/days/2026-07-28/pull")
+        east = [r for r in fake.ranges if r[0] == "payments"][-1][1]
+        client.put("/api/venue/timezone", json={"timezone": "America/Los_Angeles"})
+        assert west != east
+        assert west.endswith("-07:00") and east.endswith("-04:00")

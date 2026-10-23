@@ -237,6 +237,10 @@ class EmployeePatch(BaseModel):
     w9_received: bool | None = None
 
 
+class TimezonePatch(BaseModel):
+    timezone: str = Field(min_length=1, max_length=64)
+
+
 class SettingsPatch(BaseModel):
     category_map: dict[str, dict] | None = None
     gratuity_service_charge: dict | None = None
@@ -1786,6 +1790,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ).fetchall()
         out["employee_links"] = [dict(r) for r in linked]
         return out
+
+    @app.put("/api/venue/timezone")
+    def put_venue_timezone(body: TimezonePatch, admin: Admin, conn: DB, venue: Venue):
+        """Where the venue physically is — NOT where whoever is logged in is.
+
+        Every business day, tippable window and report boundary is built in
+        this zone, server-side, so a manager working from another country
+        changes nothing about the figures. It is editable because a venue in
+        another zone would otherwise need an env change and a redeploy, and
+        because reading it on the Setup screen is how a traveller confirms the
+        app is still on venue time (2026-10-24: Square's dashboard bucketed a
+        Poquitos week by the laptop's clock in Japan and disagreed by 3.55 h).
+
+        Finalized days keep their stored payouts — only days pulled after the
+        change use the new boundaries.
+        """
+        tz = body.timezone.strip()
+        try:
+            ZoneInfo(tz)
+        except Exception:
+            raise HTTPException(422, f"unknown timezone {tz!r} — use an IANA"
+                                     " name such as America/Los_Angeles")
+        old = venue["timezone"]
+        if tz == old:
+            return {"timezone": tz, "changed": False}
+        conn.execute("UPDATE venue SET timezone = ? WHERE id = ?", (tz, venue["id"]))
+        audit(conn, venue["id"], admin["id"], "venue_timezone_changed", "venue",
+              str(venue["id"]), json.dumps({"old": old, "new": tz}))
+        conn.commit()
+        return {"timezone": tz, "changed": True}
 
     @app.put("/api/settings")
     def put_settings(body: SettingsPatch, admin: Admin, conn: DB, venue: Venue):

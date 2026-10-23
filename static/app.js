@@ -43,6 +43,56 @@ function toast(msg, isErr = false) {
 const fmt = (cents) =>
   (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+/* ---------- time is always VENUE time ----------
+   Every instant on screen is rendered in the venue's own timezone, never the
+   device's. The owner travels, and a browser left on another clock silently
+   re-buckets everything it formats: in Japan (UTC+9 against Seattle's UTC-7)
+   a 15:28 clock-in reads 07:28 the next morning. That is exactly how Square's
+   own dashboard showed a Poquitos week as 54.77 h against our 51.22 — it
+   bucketed by the laptop (2026-10-24). Our figures come from the server, which
+   uses venue.timezone, so only the formatting here could ever drift. */
+const venueTz = () =>
+  ME?.venue?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/* Server timestamps are UTC; some carry an offset and some do not. */
+const asDate = (iso) =>
+  new Date(/[Z+]|-\d\d:\d\d$/.test(String(iso).slice(10)) ? iso : iso + "Z");
+
+const tzTime = (iso) => iso
+  ? asDate(iso).toLocaleTimeString("en-US",
+      { timeZone: venueTz(), hour: "numeric", minute: "2-digit" })
+  : "";
+
+const tzDate = (iso) => iso
+  ? asDate(iso).toLocaleDateString("en-US",
+      { timeZone: venueTz(), month: "short", day: "numeric" })
+  : "";
+
+const tzStamp = (iso) => iso ? `${tzDate(iso)} ${tzTime(iso)}` : "";
+
+/* A short label for the venue's zone ("PDT"), so a figure on screen says which
+   clock it is on without spelling out the IANA name. */
+const tzLabel = () => {
+  try {
+    return new Intl.DateTimeFormat("en-US",
+      { timeZone: venueTz(), timeZoneName: "short" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName").value;
+  } catch { return venueTz(); }
+};
+
+const deviceTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/* Shift a YYYY-MM-DD by whole days without going through the device clock.
+   Building a Date at local noon and reading it back with toISOString() is a
+   day out for anyone east of UTC+12, and the previous/next buttons on the day
+   screen are exactly where that would bite. */
+function shiftDate(dateStr, days) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function centsFromInput(el) {
   const v = parseFloat(String(el.value).replace(/[$,]/g, ""));
   return Number.isFinite(v) ? Math.round(v * 100) : 0;
@@ -219,6 +269,7 @@ async function route() {
   topbar.hidden = !ME || name === "login" || name === "venues";
   const chip = document.getElementById("venuechip");
   if (ME) chip.textContent = ME.venue?.name || "venue";
+  drawTravelNote();
   document.querySelectorAll("#topbar a").forEach((a) => {
     a.classList.toggle("active", a.dataset.nav === name);
     if (a.hasAttribute("data-admin")) a.style.display = ME?.role === "admin" ? "" : "none";
@@ -228,6 +279,23 @@ async function route() {
   view.className = name === "audit" ? "auditpage"
     : name.startsWith("print-") ? "printpage" : "";
   try { await fn(arg); } catch (e) { toast(e.message, true); }
+}
+
+/* Say so when the device is on another clock. Everything on screen is already
+   in venue time, but a traveller comparing against Square's dashboard — which
+   buckets by the browser — needs to know the two are not on the same day
+   boundary before deciding one of them is wrong (2026-10-24, Japan). */
+function drawTravelNote() {
+  let note = document.getElementById("travelnote");
+  const away = ME && ME.venue?.timezone && deviceTz() !== ME.venue.timezone;
+  if (!away) { if (note) note.remove(); return; }
+  if (!note) {
+    note = el("div", { id: "travelnote", class: "travelnote" });
+    document.getElementById("topbar").insertAdjacentElement("afterend", note);
+  }
+  note.textContent = `Times shown in venue time (${tzLabel()}). `
+    + `This device is on ${deviceTz()} — Square's own screens follow the device, `
+    + `so its day boundaries may not match.`;
 }
 
 document.getElementById("venuechip").addEventListener("click", () => {
@@ -430,9 +498,7 @@ async function renderDay(dateArg) {
     if (datePick.value) location.hash = `#/day/${datePick.value}`;
   });
   const shift = (days) => {
-    const d = new Date(dateStr + "T12:00:00");
-    d.setDate(d.getDate() + days);
-    location.hash = `#/day/${d.toISOString().slice(0, 10)}`;
+    location.hash = `#/day/${shiftDate(dateStr, days)}`;
   };
   view.append(
     el("div", { class: "row spread", style: "margin:6px 2px 12px" },
@@ -483,7 +549,7 @@ async function renderDay(dateArg) {
       });
       p.append(el("div", { class: "pullbar" }, pullBtn,
         el("span", { class: "hint" },
-          sq ? `Last pulled ${sq.pulled_at.replace("T", " ").slice(0, 16)} UTC` : "Not pulled yet")));
+          sq ? `Last pulled ${tzStamp(sq.pulled_at)} ${tzLabel()}` : "Not pulled yet")));
     }
     for (const issue of (sq?.issues || []).filter(
         (i) => i.severity === "warning" && !["all_cash_tips_zero", "missing_clockout"].includes(i.code))) {
@@ -1198,9 +1264,7 @@ async function renderDayLF(dateArg) {
   const nice = dayDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   const caption = el("div", { class: "hint" }, "");
   const shift = (days) => {
-    const d = new Date(dateStr + "T12:00:00");
-    d.setDate(d.getDate() + days);
-    location.hash = `#/day/${d.toISOString().slice(0, 10)}`;
+    location.hash = `#/day/${shiftDate(dateStr, days)}`;
   };
   const datePick = el("input", { type: "date", value: dateStr,
     style: "position:absolute;inset:0;opacity:0;width:100%;height:100%" });
@@ -1270,7 +1334,7 @@ async function renderDayLF(dateArg) {
       });
       p.append(el("div", { class: "pullbar" }, pullBtn,
         el("span", { class: "hint" },
-          sq ? `Last pulled ${sq.pulled_at.replace("T", " ").slice(0, 16)} UTC` : "Not pulled yet")));
+          sq ? `Last pulled ${tzStamp(sq.pulled_at)} ${tzLabel()}` : "Not pulled yet")));
     }
     for (const issue of (sq?.issues || []).filter(
         (i) => i.severity === "warning" && i.code !== "unattributed_tips")) {
@@ -1693,9 +1757,7 @@ async function renderDayPoq(dateArg) {
     if (datePick.value) location.hash = `#/day/${datePick.value}`;
   });
   const shift = (days) => {
-    const d = new Date(dateStr + "T12:00:00");
-    d.setDate(d.getDate() + days);
-    location.hash = `#/day/${d.toISOString().slice(0, 10)}`;
+    location.hash = `#/day/${shiftDate(dateStr, days)}`;
   };
   view.append(el("div", { class: "row spread", style: "margin:6px 2px 8px" },
     el("div", { style: "position:relative" },
@@ -1714,7 +1776,7 @@ async function renderDayPoq(dateArg) {
   const pullBtn = el("button", { class: "ghost small", type: "button" },
     "⟳ Pull from Square");
   const pullNote = el("span", { class: "hint" },
-    sq ? `Pulled ${sq.pulled_at?.slice(11, 16) || ""}` : "Not pulled yet");
+    sq ? `Pulled ${tzTime(sq.pulled_at)}` : "Not pulled yet");
   pullBtn.addEventListener("click", async () => {
     pullBtn.disabled = true;
     try {
@@ -1896,9 +1958,7 @@ async function renderDayPoq(dateArg) {
     + "under an event job; support roles are tipped out 3% each from the FOH portion."));
   view.append(el("div", { class: "seclabel" }, "Private event (optional)"), eventCard);
 
-  const hhmm = (iso) => iso
-    ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : "";
+  const hhmm = tzTime;   // venue clock, never the device's
 
   /* Flags are prompts, not errors: the day screen names each one and offers
      to mark them reviewed, which clears the ⚠ on the period screen. Marking
@@ -2858,7 +2918,7 @@ async function renderPrintSummary(anchorArg) {
     el("div", { class: "sheethead" },
       el("div", {}, el("h2", {}, `${p.venue.name} — Tip Distribution Summary`),
         el("div", { class: "subtle" }, `${SCHEME_LABEL[p.scheme] || p.scheme} · ${p.start} to ${p.end}`)),
-      el("div", { class: "subtle" }, `Generated ${new Date().toLocaleString()}`)));
+      el("div", { class: "subtle" }, `Generated ${tzStamp(new Date().toISOString())} ${tzLabel()}`)));
 
   const t = p.totals;
   const totalsTable = el("table", {},
@@ -3112,7 +3172,7 @@ async function renderPrintPayroll(anchorArg) {
       el("div", {}, el("h2", {}, `${p.venue.name} — Payroll Entry`),
         el("div", { class: "subtle" },
           `${SCHEME_LABEL[p.scheme] || p.scheme} · ${p.start} to ${p.end}`)),
-      el("div", { class: "subtle" }, `Generated ${new Date().toLocaleString()}`)),
+      el("div", { class: "subtle" }, `Generated ${tzStamp(new Date().toISOString())} ${tzLabel()}`)),
     el("table", {}, el("thead", {}, el("tr", {},
       el("th", {}, "Employee"),
       el("th", { class: "num" }, "Reg hrs"), el("th", { class: "num" }, "OT hrs"),
@@ -3280,7 +3340,7 @@ async function renderAudit() {
         let detail = r.detail_json || "";
         try { detail = JSON.stringify(JSON.parse(detail), null, 1); } catch {}
         // venue-local time, two tidy lines (stored timestamps are UTC)
-        const when = new Date(r.ts.includes("+") || r.ts.endsWith("Z") ? r.ts : r.ts + "Z");
+        const when = asDate(r.ts);
         const dateStr = when.toLocaleDateString("en-US", {
           timeZone: ME.venue.timezone, month: "short", day: "numeric" });
         const timeStr = when.toLocaleTimeString("en-US", {
@@ -3917,6 +3977,42 @@ async function renderSettings() {
       el("div", { class: "row" }, openIn, el("span", { class: "hint" }, "to"), closeIn)));
   }
   view.append(winCard);
+
+  /* --- venue timezone --- */
+  const TZ_CHOICES = ["America/Los_Angeles", "America/Denver", "America/Phoenix",
+                      "America/Chicago", "America/New_York", "Pacific/Honolulu",
+                      "America/Anchorage"];
+  const tzSel = el("select", {});
+  const tzOpts = [...new Set([ME.venue.timezone, ...TZ_CHOICES])];
+  for (const z of tzOpts) {
+    tzSel.append(el("option", { value: z, ...(z === ME.venue.timezone ? { selected: "" } : {}) }, z));
+  }
+  const tzNow = el("span", { class: "hint" });
+  const drawTzNow = () => {
+    tzNow.textContent = `It is ${tzTime(new Date().toISOString())} there now`
+      + (deviceTz() === ME.venue.timezone ? "" : `, and ${new Date().toLocaleTimeString(
+          /* deviceClockOnPurpose: showing the traveller both clocks side by side */
+          "en-US", { hour: "numeric", minute: "2-digit" })} on this device (${deviceTz()})`);
+  };
+  drawTzNow();
+  tzSel.addEventListener("change", async () => {
+    try {
+      await api("/api/venue/timezone", { method: "PUT", body: { timezone: tzSel.value } });
+      ME.venue.timezone = tzSel.value;
+      drawTzNow();
+      drawTravelNote();
+      toast("Venue timezone saved — re-pull any day you want rebuilt on it");
+    } catch (e) { tzSel.value = ME.venue.timezone; toast(e.message, true); }
+  });
+  view.append(el("div", { class: "card" },
+    el("h2", {}, "Venue timezone"),
+    el("div", { class: "row" }, tzSel, tzNow),
+    el("div", { class: "note" },
+      "Where the venue is — not where you are. Business days, tippable windows, "
+      + "hours and every report are built in this zone on the server, so working "
+      + "from another country never moves a figure. Square's own dashboards follow "
+      + "your device instead, which is why their dates can disagree with ours while "
+      + "you travel; this screen always shows venue time.")));
 
   /* --- business day boundary --- */
   const cutoffIn = el("input", { value: mm2hhmm(s.day_cutoff_minutes), style: "width:86px" });

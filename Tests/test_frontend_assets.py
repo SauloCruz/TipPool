@@ -423,3 +423,53 @@ class TestScreensRedrawThroughRoute:
                if (m := re.match(r"^\s+(?:await\s+)?(render[A-Za-z]+)\(", l))
                and m.group(1) in screens]
         assert bad == [], bad
+
+
+class TestTimesAreVenueTime:
+    """Every instant on screen is formatted in the VENUE's zone. The owner
+    travels, and a browser left on another clock re-buckets whatever it
+    formats: in Japan a 15:28 clock-in reads 07:28 the next morning. Square's
+    own dashboard does exactly that, which is how a Poquitos week showed
+    54.77 h against our 51.22 (2026-10-24)."""
+
+    def test_helpers_pin_the_zone(self):
+        assert "const venueTz = ()" in APP_JS
+        assert "timeZone: venueTz()" in APP_JS
+        for helper in ("tzTime", "tzDate", "tzStamp", "tzLabel", "asDate"):
+            assert f"const {helper} =" in APP_JS, f"{helper} missing"
+
+    def test_no_instant_is_formatted_in_the_device_clock(self):
+        """A toLocale*String call on an instant must name a timeZone. Date-only
+        labels are exempt: they build a Date at local noon and format it in the
+        same local zone, so the calendar date can never shift. One call prints
+        the device clock on purpose and says so."""
+        offenders = []
+        for call in re.finditer(r"toLocale(?:Time)?String\(", APP_JS):
+            window = APP_JS[call.start():call.start() + 220]
+            if any(ok in window for ok in ('style: "currency"', "timeZone",
+                                           "deviceClockOnPurpose")):
+                continue
+            line = APP_JS[:call.start()].count("\n") + 1
+            offenders.append(f"line {line}: {window.splitlines()[0]}")
+        assert not offenders, ("format these in venue time (tzTime/tzStamp): "
+                               + "; ".join(offenders))
+
+    def test_day_navigation_does_not_round_trip_through_the_device(self):
+        """Building a Date at local noon and reading it back with toISOString()
+        is a day out east of UTC+12 — exactly the previous/next buttons."""
+        assert "function shiftDate(dateStr, days)" in APP_JS
+        assert "setUTCDate" in APP_JS
+        assert "toISOString().slice(0, 10)" not in APP_JS.replace(
+            "return d.toISOString().slice(0, 10);", "")
+
+    def test_a_mismatched_device_clock_is_announced(self):
+        assert "function drawTravelNote()" in APP_JS
+        assert "deviceTz() !== ME.venue.timezone" in APP_JS
+        assert "travelnote" in CSS
+        assert "Square's own screens follow the device" in APP_JS
+
+    def test_setup_can_set_the_venue_zone(self):
+        assert '"/api/venue/timezone"' in APP_JS
+        assert "Venue timezone" in APP_JS
+        assert "Where the venue is — not where you are." in APP_JS
+        assert "America/Los_Angeles" in APP_JS
